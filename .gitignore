@@ -48,5 +48,10 @@ erp-frontend/components.d.ts
 *.db
 *.sqlite
 
+# Deploy artifacts (created by GitHub Actions)
+deploy-pkg/
+*.tar.gz
+
 # Logs
 *.log
+logs/
