@@ -1,0 +1,33 @@
+# Normalize line endings to LF for all text files
+* text=auto eol=lf
+
+# Python
+*.py text diff=python
+*.pyw text
+
+# JavaScript / TypeScript
+*.js text
+*.ts text
+*.vue text
+*.json text
+*.html text
+
+# SQL
+*.sql text
+
+# Config
+*.yml text
+*.yaml text
+*.toml text
+*.cfg text
+*.ini text
+
+# Binary files (do not normalize)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.eot binary
