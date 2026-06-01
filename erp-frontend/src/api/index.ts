@@ -122,4 +122,8 @@ export const aiApi = {
   supplierRanking: () => http.get('/ai/supplier-ranking'),
   salesHistory: (params?: any) => http.get('/ai/sales-history', { params }),
   salesPrediction: (productId: number) => http.post('/ai/sales-prediction', null, { params: { product_id: productId } }),
+  /** AI 对话助手 */
+  chat: (data: { messages: any[]; conversation_id: string }) => http.post('/ai/chat', data),
+  execute: (data: { conversation_id: string; action: string; params: Record<string, any> }) =>
+    http.post('/ai/execute', data),
 }

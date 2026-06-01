@@ -34,7 +34,7 @@ def save_decision(db: Session, decision_type: str, title: str,
         title=title,
         input_data=json.dumps(input_data, ensure_ascii=False),
         output_data=json.dumps(output_data, ensure_ascii=False),
-        summary=output_data.get("suggestion") or output_data.get("summary", ""),
+        summary=output_data.get("suggestion") or output_data.get("summary") or output_data.get("reason") or "",
         confidence=output_data.get("confidence", 0),
         related_id=related_id,
     )
@@ -80,6 +80,8 @@ def ai_stock_alert(
         max_stock=product.max_stock,
         recent_sales=sales_data,
     )
+    if result and result.get("status") == "error":
+        raise HTTPException(status_code=503, detail=result.get("error", "AI 服务不可用"))
 
     record = save_decision(
         db, "stock_alert",
@@ -114,6 +116,9 @@ def ai_sales_forecast(
     sales_data = [{"period": str(i), "qty": item.quantity} for i, item in enumerate(history)]
 
     result = sales_forecast(product.name, sales_data)
+    if result and result.get("status") == "error":
+        raise HTTPException(status_code=503, detail=result.get("error", "AI 服务不可用"))
+
     record = save_decision(
         db, "sales_forecast",
         f"{product.name} 销售预测",
@@ -150,6 +155,9 @@ def ai_supplier_recommend(
         [{"id": product.id, "name": product.name, "price": product.purchase_price}],
         supplier_data,
     )
+    if result and result.get("status") == "error":
+        raise HTTPException(status_code=503, detail=result.get("error", "AI 服务不可用"))
+
     record = save_decision(
         db, "supplier_recommend",
         f"{product.name} 供应商推荐",
@@ -305,6 +313,8 @@ def ai_supplier_ranking(
 
     # Call AI for intelligent ranking
     ai_result = supplier_ranking_ai(supplier_data)
+    if ai_result and ai_result.get("status") == "error":
+        raise HTTPException(status_code=503, detail=ai_result.get("error", "AI 服务不可用"))
     return {"suppliers": supplier_data, "ai_analysis": ai_result}
 
 
@@ -358,6 +368,8 @@ def ai_sales_prediction(
     sales_data = [{"date": str(h.order_date), "qty": h.quantity} for h in history_data]
 
     result = sales_forecast(product.name, sales_data)
+    if result and result.get("status") == "error":
+        raise HTTPException(status_code=503, detail=result.get("error", "AI 服务不可用"))
     record = save_decision(
         db, "sales_forecast",
         f"{product.name} 销售预测",

@@ -16,6 +16,7 @@ def _call_llm(system_prompt: str, user_prompt: str) -> dict | None:
     """调用大模型 API"""
     if not client:
         return {
+            "status": "error",
             "error": "AI 服务未配置，请在 .env 中设置 OPENAI_API_KEY",
             "suggestion": None,
             "confidence": 0,
@@ -29,12 +30,13 @@ def _call_llm(system_prompt: str, user_prompt: str) -> dict | None:
             ],
             temperature=0.3,
             response_format={"type": "json_object"},
+            # extra_body={"thinking": {"type": "enabled", "budget_tokens": 1024}},
         )
         text = resp.choices[0].message.content
         return json.loads(text)
     except Exception as e:
         logger.error(f"AI 调用失败: {e}")
-        return {"error": str(e), "suggestion": None, "confidence": 0}
+        return {"status": "error", "error": str(e), "suggestion": None, "confidence": 0}
 
 
 def analyze_stock_alert(product_name: str, current_qty: float, min_stock: float,

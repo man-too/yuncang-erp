@@ -1,6 +1,9 @@
 """应用配置"""
+import os
 from pydantic_settings import BaseSettings
 from typing import List
+
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
 
 
 class Settings(BaseSettings):
@@ -19,7 +22,7 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.CORS_ORIGINS.split(",")]
 
     class Config:
-        env_file = ".env"
+        env_file = _env_path
 
 
 settings = Settings()
