@@ -1,5 +1,5 @@
 """库存管理路由"""
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import Optional
@@ -32,9 +32,10 @@ def create_warehouse(req: WarehouseCreate, db: Session = Depends(get_db), _user:
 @router.delete("/warehouses/{wh_id}")
 def delete_warehouse(wh_id: int, db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
     wh = db.query(Warehouse).filter(Warehouse.id == wh_id).first()
-    if wh:
-        db.delete(wh)
-        db.commit()
+    if not wh:
+        raise HTTPException(status_code=404, detail="仓库不存在")
+    db.delete(wh)
+    db.commit()
     return {"message": "删除成功"}
 
 
@@ -98,9 +99,10 @@ def list_stock(
 @router.delete("/stock/{stock_id}")
 def delete_stock(stock_id: int, db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
     inv = db.query(Inventory).filter(Inventory.id == stock_id).first()
-    if inv:
-        db.delete(inv)
-        db.commit()
+    if not inv:
+        raise HTTPException(status_code=404, detail="库存记录不存在")
+    db.delete(inv)
+    db.commit()
     return {"message": "删除成功"}
 
 
@@ -162,32 +164,63 @@ def list_records(
 @router.get("/alerts")
 def list_alerts(
     resolved: Optional[bool] = Query(None),
+    keyword: Optional[str] = Query(None, description="产品名称/编码搜索"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    query = db.query(InventoryAlert)
+    query = db.query(InventoryAlert, Product).join(
+        Product, InventoryAlert.product_id == Product.id
+    )
     if resolved is not None:
         query = query.filter(InventoryAlert.is_resolved == resolved)
-    return query.order_by(InventoryAlert.id.desc()).limit(50).all()
+    if keyword:
+        query = query.filter(
+            Product.name.ilike(f"%{keyword}%") | Product.code.ilike(f"%{keyword}%")
+        )
+
+    total = query.count()
+    results = query.order_by(InventoryAlert.id.desc()).offset((page - 1) * page_size).limit(page_size).all()
+    items = []
+    for alert, prod in results:
+        items.append({
+            "id": alert.id,
+            "product_id": alert.product_id,
+            "product_name": prod.name,
+            "product_code": prod.code,
+            "warehouse_id": alert.warehouse_id,
+            "alert_type": alert.alert_type,
+            "current_quantity": alert.current_quantity,
+            "threshold_value": alert.threshold_value,
+            "level": alert.level,
+            "is_resolved": alert.is_resolved,
+            "max_stock": float(prod.max_stock),
+            "min_stock": float(prod.min_stock),
+            "unit": prod.unit,
+        })
+    return {"total": total, "page": page, "page_size": page_size, "items": items}
 
 
 @router.delete("/alerts/{alert_id}")
 def delete_alert(alert_id: int, db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
     alert = db.query(InventoryAlert).filter(InventoryAlert.id == alert_id).first()
-    if alert:
-        db.delete(alert)
-        db.commit()
+    if not alert:
+        raise HTTPException(status_code=404, detail="预警记录不存在")
+    db.delete(alert)
+    db.commit()
     return {"message": "删除成功"}
 
 
 @router.post("/alerts/{alert_id}/resolve")
 def resolve_alert(alert_id: int, db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
     alert = db.query(InventoryAlert).filter(InventoryAlert.id == alert_id).first()
-    if alert:
-        alert.is_resolved = True
-        from datetime import datetime, timezone
-        alert.resolved_at = datetime.now(timezone.utc)
-        db.commit()
+    if not alert:
+        raise HTTPException(status_code=404, detail="预警记录不存在")
+    alert.is_resolved = True
+    from datetime import datetime, timezone
+    alert.resolved_at = datetime.now(timezone.utc)
+    db.commit()
     return {"message": "已处理"}
 
 
@@ -236,3 +269,52 @@ def alert_heatmap(
         })
 
     return items
+
+
+# ========== 低库存 ==========
+@router.get("/low-stock")
+def list_low_stock(
+    keyword: Optional[str] = Query(None, description="产品名称/编码搜索"),
+    warehouse_id: Optional[int] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """获取低库存产品列表（带产品信息和仓库名）"""
+    query = db.query(Inventory, Product, Warehouse).join(
+        Product, Inventory.product_id == Product.id
+    ).join(
+        Warehouse, Inventory.warehouse_id == Warehouse.id
+    ).filter(
+        Inventory.quantity <= Product.min_stock,
+        Product.is_active == True,
+    )
+    if keyword:
+        query = query.filter(
+            Product.name.ilike(f"%{keyword}%") | Product.code.ilike(f"%{keyword}%")
+        )
+    if warehouse_id:
+        query = query.filter(Inventory.warehouse_id == warehouse_id)
+
+    total = query.count()
+    results = query.order_by(Inventory.quantity.asc()).offset((page - 1) * page_size).limit(page_size).all()
+    items = []
+    for inv, prod, wh in results:
+        suggested_qty = max(0, prod.max_stock - inv.quantity)
+        items.append({
+            "id": inv.id,
+            "product_id": inv.product_id,
+            "product_code": prod.code,
+            "product_name": prod.name,
+            "specification": prod.specification or "",
+            "warehouse_id": inv.warehouse_id,
+            "warehouse_name": wh.name,
+            "current_qty": float(inv.quantity),
+            "min_stock": float(prod.min_stock),
+            "max_stock": float(prod.max_stock),
+            "unit": prod.unit,
+            "suggested_qty": float(suggested_qty),
+            "purchase_price": float(prod.purchase_price),
+        })
+    return {"total": total, "page": page, "page_size": page_size, "items": items}

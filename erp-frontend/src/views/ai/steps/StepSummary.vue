@@ -1,50 +1,80 @@
 <template>
   <div class="step-summary">
-    <!-- Left: Summary overview -->
-    <div class="summary-left">
-      <div style="text-align: center; padding: 40px 0;">
-        <div style="font-size: 48px;">✅</div>
+    <!-- 顶部：确认标题 -->
+    <div class="summary-hero">
+      <div class="hero-icon">✅</div>
+      <div class="hero-text">
         <h3>采购计划确认</h3>
-        <p style="color: #909399; font-size: 14px;">请核对以下采购计划，确认后生成采购订单</p>
+        <p>请核对以下采购计划，确认后生成采购订单</p>
       </div>
-
-      <el-row :gutter="12" style="margin-top: 12px;">
-        <el-col :span="8">
-          <el-card shadow="hover" style="text-align: center;">
-            <div style="font-size: 24px; font-weight: bold;">{{ selectedProducts.length }}</div>
-            <div style="font-size: 12px; color: #909399;">产品数</div>
-          </el-card>
-        </el-col>
-        <el-col :span="8">
-          <el-card shadow="hover" style="text-align: center;">
-            <div style="font-size: 24px; font-weight: bold;">{{ totalQuantity }}</div>
-            <div style="font-size: 12px; color: #909399;">采购总量</div>
-          </el-card>
-        </el-col>
-        <el-col :span="8">
-          <el-card shadow="hover" style="text-align: center;">
-            <div style="font-size: 24px; font-weight: bold; color: #f56c6c;">¥{{ totalAmount }}</div>
-            <div style="font-size: 12px; color: #909399;">预估金额</div>
-          </el-card>
-        </el-col>
-      </el-row>
     </div>
 
-    <!-- Right: Order preview table -->
-    <div class="summary-right">
-      <h4 style="margin: 0 0 12px;">采购订单预览</h4>
-      <el-table :data="orderItems" stripe size="small" max-height="360" highlight-current-row>
-        <el-table-column prop="product_name" label="产品" min-width="120" />
-        <el-table-column prop="quantity" label="数量" width="70" align="right" />
-        <el-table-column prop="unit_price" label="单价" width="90" align="right" />
-        <el-table-column prop="total" label="金额" width="100" align="right">
-          <template #default="{ row }">¥{{ row.total.toFixed(2) }}</template>
+    <!-- 统计卡片 -->
+    <el-row :gutter="16" class="stats-row">
+      <el-col :span="6">
+        <div class="stat-card">
+          <div class="stat-value">{{ selectedProducts.length }}</div>
+          <div class="stat-label">产品数</div>
+        </div>
+      </el-col>
+      <el-col :span="6">
+        <div class="stat-card">
+          <div class="stat-value">{{ totalQuantity }}</div>
+          <div class="stat-label">采购总量(件)</div>
+        </div>
+      </el-col>
+      <el-col :span="6">
+        <div class="stat-card">
+          <div class="stat-value price">¥{{ avgPrice }}</div>
+          <div class="stat-label">均价</div>
+        </div>
+      </el-col>
+      <el-col :span="6">
+        <div class="stat-card highlight">
+          <div class="stat-value price">¥{{ totalAmount }}</div>
+          <div class="stat-label">预估总金额</div>
+        </div>
+      </el-col>
+    </el-row>
+
+    <!-- 订单预览表格 -->
+    <div class="table-section">
+      <h4>采购订单预览</h4>
+      <el-table :data="orderItems" stripe size="default" max-height="400" class="order-table">
+        <el-table-column type="index" label="#" width="50" align="center" />
+        <el-table-column prop="product_name" label="产品名称" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="supplier_name" label="供应商" min-width="140" show-overflow-tooltip />
+        <el-table-column prop="quantity" label="采购数量" width="110" align="center" />
+        <el-table-column label="单价" width="110" align="right">
+          <template #default="{ row }">¥{{ row.unit_price.toFixed(2) }}</template>
+        </el-table-column>
+        <el-table-column label="金额" width="130" align="right">
+          <template #default="{ row }">
+            <span class="amount-cell">¥{{ row.total.toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}</span>
+          </template>
         </el-table-column>
       </el-table>
+    </div>
 
-      <div class="summary-actions">
-        <el-button @click="store.prevStep()">◀ 返回修改</el-button>
-        <el-button type="primary" @click="onConfirm" :loading="submitting" :disabled="orderItems.length === 0">
+    <!-- 底部合计与操作 -->
+    <div class="summary-footer">
+      <div class="footer-totals">
+        <div class="total-row">
+          <span class="total-label">合计产品</span>
+          <span class="total-num">{{ selectedProducts.length }} 项</span>
+        </div>
+        <div class="total-row">
+          <span class="total-label">合计数量</span>
+          <span class="total-num">{{ totalQuantity }} 件</span>
+        </div>
+        <div class="total-row emphasis">
+          <span class="total-label">采购总金额</span>
+          <span class="total-num">¥{{ totalAmount }}</span>
+        </div>
+      </div>
+      <div class="footer-actions">
+        <el-button size="large" @click="store.prevStep()">◀ 返回修改</el-button>
+        <el-button size="large" type="primary" @click="onConfirm" :loading="submitting" :disabled="orderItems.length === 0">
           ✅ 确认生成采购订单
         </el-button>
       </div>
@@ -61,24 +91,38 @@ import { purchaseApi } from '@/api'
 const store = usePurchaseDecisionStore()
 const submitting = ref(false)
 
-const selectedProducts = computed(() => store.selectedProducts.value)
+const selectedProducts = computed(() => store.allProducts)
 
 const totalQuantity = computed(() => {
-  return Object.values(store.quantities.value).reduce((a, b) => a + (b || 0), 0)
+  return Object.values(store.forecastQuantities).reduce((a, b) => a + (b || 0), 0)
 })
 
 const totalAmount = computed(() => {
   return orderItems.value.reduce((s, item) => s + item.total, 0).toLocaleString('zh-CN', { minimumFractionDigits: 2 })
 })
 
+const avgPrice = computed(() => {
+  if (orderItems.value.length === 0) return '0.00'
+  const avg = orderItems.value.reduce((s, i) => s + i.unit_price, 0) / orderItems.value.length
+  return avg.toFixed(2)
+})
+
 const orderItems = computed(() => {
-  return selectedProducts.value.map(p => ({
-    product_id: p.product_id,
-    product_name: p.product_name,
-    quantity: store.quantities.value[p.product_id] || p.suggested_qty || 0,
-    unit_price: p.max_stock > 0 ? Math.round(p.max_stock / p.min_stock * 100) / 100 : 0,
-    total: (store.quantities.value[p.product_id] || 0) * (p.max_stock > 0 ? Math.round(p.max_stock / p.min_stock * 100) / 100 : 0),
-  })).filter(item => item.quantity > 0)
+  return store.allProducts.map(p => {
+    const qty = store.forecastQuantities[p.product_id] || p.suggested_qty || 0
+    const price = store.forecastPrices[p.product_id] || p.purchase_price || 0
+    const sid = store.supplierChoices[p.product_id]
+    const supplier = sid ? store.supplierInfo[sid] : null
+    return {
+      product_id: p.product_id,
+      product_name: p.product_name,
+      supplier_id: sid || 1,
+      supplier_name: supplier?.name || '未指定',
+      quantity: qty,
+      unit_price: price,
+      total: qty * price,
+    }
+  }).filter(item => item.quantity > 0)
 })
 
 async function onConfirm() {
@@ -88,9 +132,8 @@ async function onConfirm() {
   }
   submitting.value = true
   try {
-    // Create purchase order using the first product's qty as sample (simplified)
     const orderData = {
-      supplier_id: 1,
+      supplier_id: orderItems.value[0]?.supplier_id || 1,
       items: orderItems.value.map(item => ({
         product_id: item.product_id,
         quantity: item.quantity,
@@ -112,25 +155,131 @@ async function onConfirm() {
 <style scoped>
 .step-summary {
   display: flex;
+  flex-direction: column;
   gap: 20px;
-  height: 100%;
+  padding: 8px 0;
 }
-.summary-left {
-  flex: 1;
+
+/* 顶部 Hero */
+.summary-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 24px;
+  background: linear-gradient(135deg, #f0f9ff, #e8f4fd);
+  border-radius: 12px;
+  border: 1px solid #d0e8f7;
+}
+.hero-icon {
+  font-size: 48px;
+  line-height: 1;
+}
+.hero-text h3 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #303133;
+}
+.hero-text p {
+  margin: 0;
+  font-size: 14px;
+  color: #909399;
+}
+
+/* 统计卡片 */
+.stats-row {
+  margin: 0 !important;
+}
+.stat-card {
+  text-align: center;
+  padding: 16px 8px;
+  background: #fff;
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+  transition: box-shadow 0.2s;
+}
+.stat-card:hover {
+  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+}
+.stat-card.highlight {
+  background: #fef0f0;
+  border-color: #fde2e2;
+}
+.stat-value {
+  font-size: 26px;
+  font-weight: 700;
+  color: #303133;
+  line-height: 1.3;
+}
+.stat-value.price {
+  color: #f56c6c;
+}
+.stat-label {
+  font-size: 13px;
+  color: #909399;
+  margin-top: 2px;
+}
+
+/* 表格 */
+.table-section {
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
+  gap: 10px;
 }
-.summary-right {
-  width: 100%;
+.table-section h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+}
+.order-table :deep(.amount-cell) {
+  font-weight: 600;
+  color: #f56c6c;
+}
+
+/* 底部 */
+.summary-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 20px 24px;
+  background: #fafbfc;
+  border-radius: 12px;
+  border: 1px solid #ebeef5;
+}
+.footer-totals {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-}
-.summary-actions {
-  display: flex;
-  justify-content: flex-end;
   gap: 8px;
-  margin-top: 8px;
+}
+.total-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.total-label {
+  font-size: 14px;
+  color: #606266;
+  min-width: 80px;
+  text-align: right;
+}
+.total-num {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+}
+.total-row.emphasis .total-label {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+}
+.total-row.emphasis .total-num {
+  font-size: 22px;
+  font-weight: 700;
+  color: #f56c6c;
+}
+.footer-actions {
+  display: flex;
+  gap: 10px;
 }
 </style>

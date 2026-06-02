@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
     OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-4"
+    OPENAI_MODEL: str = "deepseek-chat"
     AI_BASE_URL: str = "https://api.deepseek.com/v1"
     AI_AGENT_ENABLED: bool = True
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"

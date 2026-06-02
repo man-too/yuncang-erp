@@ -22,16 +22,28 @@ def _call_llm(system_prompt: str, user_prompt: str) -> dict | None:
             "confidence": 0,
         }
     try:
-        resp = client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.3,
-            response_format={"type": "json_object"},
-            # extra_body={"thinking": {"type": "enabled", "budget_tokens": 1024}},
-        )
+        try:
+            resp = client.chat.completions.create(
+                model=settings.OPENAI_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.3,
+                response_format={"type": "json_object"},
+            )
+        except Exception as e:
+            if "response_format" in str(e).lower() or "json_object" in str(e).lower():
+                resp = client.chat.completions.create(
+                    model=settings.OPENAI_MODEL,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=0.3,
+                )
+            else:
+                raise
         text = resp.choices[0].message.content
         return json.loads(text)
     except Exception as e:

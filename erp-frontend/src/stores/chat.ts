@@ -67,6 +67,7 @@ export const useChatStore = defineStore('chat', () => {
         blocks: (res.blocks || []).map((b: any) => normalizeBlock(b)),
       })
     } catch (e: any) {
+      addMessage({ role: 'assistant', content: '抱歉，请求失败，请稍后重试。', blocks: [] })
       ElMessage.error(e?.response?.data?.detail || '对话请求失败')
     } finally {
       isLoading.value = false
@@ -148,35 +149,40 @@ export const useChatStore = defineStore('chat', () => {
     addMessage({ role: 'user', content, blocks: [] })
     isLoading.value = true
 
-    // Step 1: Always fetch direct chart blocks (non-blocking for LLM)
-    const directBlocks: MessageBlock[] = await fetchQuickActionBlocks(type)
-
-    // Step 2: Try LLM for text analysis
-    let llmContent = ''
-    let llmBlocks: MessageBlock[] = []
     try {
-      const apiMessages = messages.value
-        .filter(m => m.role !== 'system')
-        .map(m => ({ role: m.role, content: m.content }))
+      // Step 1: Always fetch direct chart blocks (non-blocking for LLM)
+      const directBlocks: MessageBlock[] = await fetchQuickActionBlocks(type)
 
-      const res: any = await aiApi.chat({
-        messages: apiMessages,
-        conversation_id: conversationId.value,
+      // Step 2: Try LLM for text analysis
+      let llmContent = ''
+      let llmBlocks: MessageBlock[] = []
+      try {
+        const apiMessages = messages.value
+          .filter(m => m.role !== 'system')
+          .map(m => ({ role: m.role, content: m.content }))
+
+        const res: any = await aiApi.chat({
+          messages: apiMessages,
+          conversation_id: conversationId.value,
+        })
+        conversationId.value = res.conversation_id || conversationId.value
+        llmContent = res.content || ''
+        llmBlocks = (res.blocks || []).map((b: any) => normalizeBlock(b))
+      } catch {
+        llmContent = '抱歉，请求失败，请稍后重试。'
+      }
+
+      // Step 3: Merge and display
+      addMessage({
+        role: 'assistant',
+        content: llmContent,
+        blocks: [...directBlocks, ...llmBlocks],
       })
-      conversationId.value = res.conversation_id || conversationId.value
-      llmContent = res.content || ''
-      llmBlocks = (res.blocks || []).map((b: any) => normalizeBlock(b))
     } catch {
-      llmContent = '数据已加载（AI分析暂不可用）'
+      addMessage({ role: 'assistant', content: '抱歉，请求失败，请稍后重试。', blocks: [] })
+    } finally {
+      isLoading.value = false
     }
-
-    // Step 3: Merge and display
-    addMessage({
-      role: 'assistant',
-      content: llmContent,
-      blocks: [...directBlocks, ...llmBlocks],
-    })
-    isLoading.value = false
   }
 
   async function fetchQuickActionBlocks(type: string): Promise<MessageBlock[]> {

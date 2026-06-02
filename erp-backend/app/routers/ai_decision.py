@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta, date
 from collections import defaultdict
 from typing import Optional
 
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -25,6 +26,10 @@ from app.routers.auth import get_current_user
 from app.models.user import User
 
 router = APIRouter(prefix="/api/ai", tags=["AI 智能决策"])
+
+
+class StockAlertBatchRequest(BaseModel):
+    product_ids: list[int]
 
 
 def save_decision(db: Session, decision_type: str, title: str,
@@ -61,16 +66,16 @@ def ai_stock_alert(
     # 获取近期销售数据（简化：直接从数据库取）
     from app.models.sale import SaleOrderItem, SaleOrder
     recent_sales = (
-        db.query(SaleOrderItem)
+        db.query(SaleOrderItem, SaleOrder.order_date)
         .join(SaleOrder, SaleOrder.id == SaleOrderItem.order_id)
         .filter(SaleOrderItem.product_id == product_id)
-        .order_by(SaleOrder.id.desc())
+        .order_by(SaleOrder.order_date.desc())
         .limit(30)
         .all()
     )
     sales_data = [
-        {"date": str(soi.order_id), "qty": soi.quantity}
-        for soi in recent_sales
+        {"date": str(order_date), "qty": soi.quantity}
+        for soi, order_date in recent_sales
     ]
 
     result = analyze_stock_alert(
@@ -93,6 +98,80 @@ def ai_stock_alert(
     return record
 
 
+@router.post("/stock-alert-batch")
+def ai_stock_alert_batch(
+    body: StockAlertBatchRequest,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """批量库存风险分析"""
+    results = []
+
+    for product_id in body.product_ids:
+        try:
+            product = db.query(Product).filter(Product.id == product_id).first()
+            if not product:
+                results.append({
+                    "product_id": product_id,
+                    "product_name": f"#{product_id}",
+                    "status": "error",
+                    "error": "产品不存在",
+                })
+                continue
+
+            inv = db.query(Inventory).filter(Inventory.product_id == product_id).first()
+            current_qty = inv.quantity if inv else 0
+
+            recent_sales = (
+                db.query(SaleOrderItem, SaleOrder.order_date)
+                .join(SaleOrder, SaleOrder.id == SaleOrderItem.order_id)
+                .filter(SaleOrderItem.product_id == product_id)
+                .order_by(SaleOrder.order_date.desc())
+                .limit(30)
+                .all()
+            )
+            sales_data = [
+                {"date": str(order_date), "qty": soi.quantity}
+                for soi, order_date in recent_sales
+            ]
+
+            result = analyze_stock_alert(
+                product_name=product.name,
+                current_qty=current_qty,
+                min_stock=product.min_stock,
+                max_stock=product.max_stock,
+                recent_sales=sales_data,
+            )
+
+            if result and result.get("status") == "error":
+                results.append({
+                    "product_id": product_id,
+                    "product_name": product.name,
+                    "current_qty": current_qty,
+                    "risk_level": "unknown",
+                    "suggestion": result.get("error", "AI 服务不可用"),
+                    "ai_analysis": None,
+                })
+            else:
+                results.append({
+                    "product_id": product_id,
+                    "product_name": product.name,
+                    "current_qty": current_qty,
+                    "risk_level": result.get("risk_level", "unknown") if result else "unknown",
+                    "suggestion": result.get("suggestion", "") if result else "",
+                    "ai_analysis": result,
+                })
+        except Exception:
+            results.append({
+                "product_id": product_id,
+                "product_name": f"#{product_id}",
+                "status": "error",
+                "error": "AI 分析失败",
+            })
+
+    return {"results": results}
+
+
 @router.post("/sales-forecast")
 def ai_sales_forecast(
     product_id: int = Query(...),
@@ -106,14 +185,14 @@ def ai_sales_forecast(
 
     from app.models.sale import SaleOrderItem, SaleOrder
     history = (
-        db.query(SaleOrderItem)
+        db.query(SaleOrderItem, SaleOrder.order_date)
         .join(SaleOrder, SaleOrder.id == SaleOrderItem.order_id)
         .filter(SaleOrderItem.product_id == product_id)
-        .order_by(SaleOrder.id.desc())
+        .order_by(SaleOrder.order_date.desc())
         .limit(90)
         .all()
     )
-    sales_data = [{"period": str(i), "qty": item.quantity} for i, item in enumerate(history)]
+    sales_data = [{"period": str(order_date), "qty": soi.quantity} for soi, order_date in history]
 
     result = sales_forecast(product.name, sales_data)
     if result and result.get("status") == "error":

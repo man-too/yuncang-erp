@@ -92,6 +92,7 @@ export const inventoryApi = {
   deleteAlert: (id: number) => http.delete(`/inventory/alerts/${id}`),
   resolveAlert: (id: number) => http.post(`/inventory/alerts/${id}/resolve`),
   heatmap: (params?: any) => http.get('/inventory/alerts/heatmap', { params }),
+  lowStock: (params?: any) => http.get('/inventory/low-stock', { params }),
 }
 
 /** 销售 */
@@ -122,6 +123,8 @@ export const aiApi = {
   supplierRanking: () => http.get('/ai/supplier-ranking'),
   salesHistory: (params?: any) => http.get('/ai/sales-history', { params }),
   salesPrediction: (productId: number) => http.post('/ai/sales-prediction', null, { params: { product_id: productId } }),
+  /** AI 批量风险评估 */
+  stockAlertBatch: (data: { product_ids: number[] }) => http.post('/ai/stock-alert-batch', data),
   /** AI 对话助手 */
   chat: (data: { messages: any[]; conversation_id: string }) => http.post('/ai/chat', data),
   execute: (data: { conversation_id: string; action: string; params: Record<string, any> }) =>

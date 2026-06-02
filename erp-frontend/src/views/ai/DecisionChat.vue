@@ -50,6 +50,7 @@ import { useChatStore } from '@/stores/chat'
 import ChatMessage from './ChatMessage.vue'
 import QuickActions from './QuickActions.vue'
 
+const emit = defineEmits<{ panelFocus: [type: string] }>()
 const store = useChatStore()
 const inputText = ref('')
 const msgContainer = ref<HTMLElement>()
@@ -73,6 +74,7 @@ async function handleSend() {
 }
 
 function handleQuickAction(payload: { type: string; prompt: string }) {
+  emit('panelFocus', payload.type)
   store.sendQuickAction(payload.type, payload.prompt)
 }
 

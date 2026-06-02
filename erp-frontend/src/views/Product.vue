@@ -19,8 +19,8 @@
           </el-col>
           <el-col :span="6">
             <el-select v-model="filters.is_active" placeholder="状态" clearable style="width: 100%" size="default">
-              <el-option label="启用" :value="1" />
-              <el-option label="禁用" :value="0" />
+              <el-option label="启用" :value="true" />
+              <el-option label="禁用" :value="false" />
             </el-select>
           </el-col>
           <el-col :span="6" style="display: flex; justify-content: flex-end; align-items: center;">

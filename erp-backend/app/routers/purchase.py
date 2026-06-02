@@ -161,9 +161,11 @@ def create_inbound(req: PurchaseInboundCreate, db: Session = Depends(get_db), us
             db.flush()
 
         qty = item.quantity - item.received_quantity
+        if qty <= 0:
+            continue
         inv.quantity += qty
         inv.available_quantity = inv.quantity - inv.locked_quantity
-        item.received_quantity = item.quantity
+        item.received_quantity += qty
 
         db.add(InventoryRecord(
             product_id=item.product_id,
@@ -176,9 +178,9 @@ def create_inbound(req: PurchaseInboundCreate, db: Session = Depends(get_db), us
             ref_id=inbound.id,
             operator_id=user.id,
         ))
-        total_in += item.total_price
+        total_in += qty * item.unit_price
 
-    order.received_amount = total_in
+    order.received_amount += total_in
     # 检查是否全部收货
     all_received = all(
         item.received_quantity >= item.quantity

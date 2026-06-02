@@ -179,7 +179,7 @@ function navigateTo(link: string) {
 
 function isStatusValue(value: any): boolean {
   if (typeof value !== 'string') return false
-  const keywords = ['正常', '告警', '预警', '偏高', '偏低', '缺货', '严重', '紧急', '高', '中', '低', 'active', 'inactive', 'draft', 'completed', 'cancelled', 'approved']
+  const keywords = ['正常', '告警', '预警', '偏高', '偏低', '缺货', '严重', '紧急', 'active', 'inactive', 'draft', 'completed', 'cancelled', 'approved']
   return keywords.some(k => value.includes(k))
 }
 
@@ -187,10 +187,8 @@ function getStatusType(value: string): string {
   if (value.includes('正常') || value.includes('completed') || value.includes('active')) return 'success'
   if (value.includes('告警') || value.includes('严重') || value.includes('缺货') || value.includes('cancelled')) return 'danger'
   if (value.includes('预警') || value.includes('偏低') || value.includes('紧急') || value.includes('draft')) return 'warning'
-  if (value.includes('偏高') || value.includes('中')) return 'info'
+  if (value.includes('偏高')) return 'info'
   if (value.includes('approved')) return 'primary'
-  if (value.includes('高')) return 'danger'
-  if (value.includes('低')) return 'info'
   return 'info'
 }
 

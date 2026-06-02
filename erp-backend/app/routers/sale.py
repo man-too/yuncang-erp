@@ -7,7 +7,7 @@ from typing import Optional
 from app.database import get_db
 from app.models.sale import Customer, SaleOrder, SaleOrderItem, SaleOutbound
 from app.models.inventory import Inventory, InventoryRecord
-from app.schemas.business import CustomerCreate, SaleOrderCreate, SaleOutboundCreate
+from app.schemas.business import CustomerCreate, CustomerUpdate, SaleOrderCreate, SaleOutboundCreate
 from app.routers.auth import get_current_user
 from app.models.user import User
 
@@ -57,13 +57,14 @@ def create_customer(req: CustomerCreate, db: Session = Depends(get_db), _user: U
 
 
 @router.put("/customers/{customer_id}")
-def update_customer(customer_id: int, req: CustomerCreate, db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
+def update_customer(customer_id: int, req: CustomerUpdate, db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="客户不存在")
     for key, val in req.model_dump(exclude_unset=True).items():
         setattr(customer, key, val)
     db.commit()
+    db.refresh(customer)
     return customer
 
 
@@ -197,31 +198,39 @@ def create_outbound(req: SaleOutboundCreate, db: Session = Depends(get_db), user
     total_out = 0
     for item in items:
         qty = item.quantity - item.shipped_quantity
+        if qty <= 0:
+            continue
+
         inv = db.query(Inventory).filter(
             Inventory.product_id == item.product_id,
             Inventory.warehouse_id == req.warehouse_id,
         ).first()
-        if inv:
-            inv.quantity -= qty
-            inv.available_quantity = inv.quantity - inv.locked_quantity
+        if not inv or inv.available_quantity < qty:
+            raise HTTPException(status_code=400, detail=f"产品 {item.product_id} 库存不足")
 
-        item.shipped_quantity = item.quantity
-        total_out += item.total_price
+        inv.quantity -= qty
+        inv.available_quantity = inv.quantity - inv.locked_quantity
+        item.shipped_quantity += qty
 
         db.add(InventoryRecord(
             product_id=item.product_id,
             warehouse_id=req.warehouse_id,
             change_type="outbound",
             change_quantity=-qty,
-            before_quantity=inv.quantity + qty if inv else 0,
-            after_quantity=inv.quantity if inv else 0,
+            before_quantity=inv.quantity + qty,
+            after_quantity=inv.quantity,
             ref_type="sale_outbound",
             ref_id=outbound.id,
             operator_id=user.id,
         ))
+        total_out += qty * item.unit_price
 
-    order.shipped_amount = total_out
-    order.status = "completed"
+    order.shipped_amount += total_out
+    all_shipped = all(
+        item.shipped_quantity >= item.quantity
+        for item in items
+    )
+    order.status = "completed" if all_shipped else "partially_shipped"
     outbound.total_amount = total_out
     db.commit()
     return {"message": "出库成功", "outbound_no": outbound_no}

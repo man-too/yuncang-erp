@@ -462,14 +462,26 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
             logger.info(f"[Chat] 工具执行完毕, full_messages共{len(full_messages)}条, direct_blocks={len(direct_blocks)}个")
 
             # Second call: LLM analyzes tool results and generates response with blocks
-            resp2 = client.chat.completions.create(
-                model=settings.OPENAI_MODEL,
-                messages=full_messages,
-                temperature=0.3,
-                max_tokens=4096,
-                response_format={"type": "json_object"},
-                extra_body={"thinking": {"type": "disabled"}},
-            )
+            try:
+                resp2 = client.chat.completions.create(
+                    model=settings.OPENAI_MODEL,
+                    messages=full_messages,
+                    temperature=0.3,
+                    max_tokens=4096,
+                    response_format={"type": "json_object"},
+                    extra_body={"thinking": {"type": "disabled"}},
+                )
+            except Exception as e:
+                if "response_format" in str(e).lower() or "json_object" in str(e).lower():
+                    resp2 = client.chat.completions.create(
+                        model=settings.OPENAI_MODEL,
+                        messages=full_messages,
+                        temperature=0.3,
+                        max_tokens=4096,
+                        extra_body={"thinking": {"type": "disabled"}},
+                    )
+                else:
+                    raise
             raw_content = resp2.choices[0].message.content
 
             # ═══ 日志③：第二次 AI 调用结果 ═══
@@ -608,10 +620,33 @@ def _parse_response(raw: str | None) -> dict:
         if result:
             return result
 
-    # Try finding JSON object in the text
-    for match in re.finditer(r'\{[^{}]*"content"\s*:\s*".+?"[^{}]*\}', text, re.DOTALL):
-        result = try_parse(match.group(0))
-        if result:
-            return result
+    # Try extracting the outermost JSON object by brace counting (handles nested braces)
+    start = text.find("{")
+    if start != -1:
+        depth = 0
+        in_string = False
+        escape_next = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == "\\":
+                escape_next = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    result = try_parse(text[start:i + 1])
+                    if result:
+                        return result
+                    break
 
     return {"content": raw, "blocks": []}

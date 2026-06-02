@@ -24,6 +24,7 @@ class SupplierUpdate(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     address: Optional[str] = None
+    tax_id: Optional[str] = None
     status: Optional[str] = None
     payment_terms: Optional[str] = None
     delivery_lead_time: Optional[int] = None
@@ -74,6 +75,7 @@ class ProductUpdate(BaseModel):
     min_stock: Optional[float] = None
     max_stock: Optional[float] = None
     barcode: Optional[str] = None
+    is_active: Optional[bool] = None
     remark: Optional[str] = None
 
 
@@ -141,6 +143,18 @@ class CustomerCreate(BaseModel):
     tax_id: str = ""
     credit_limit: float = 0.0
     remark: str = ""
+
+
+class CustomerUpdate(BaseModel):
+    name: Optional[str] = None
+    contact_person: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
+    tax_id: Optional[str] = None
+    is_active: Optional[bool] = None
+    credit_limit: Optional[float] = None
+    remark: Optional[str] = None
 
 
 class CustomerResponse(BaseModel):

@@ -43,7 +43,7 @@
             <el-input-number v-model="filters.amount_max" :min="0" placeholder="最大金额" style="width: 100%" controls-position="right" />
           </el-col>
           <el-col :span="8">
-            <el-date-picker v-model="filters.date_range" type="daterange" range-separator="至" start-placeholder="下单日期起" end-placeholder="下单日期止" style="width: 100%" size="default" />
+            <el-date-picker v-model="filters.date_range" type="daterange" range-separator="至" start-placeholder="下单日期起" end-placeholder="下单日期止" style="width: 100%" size="default" value-format="YYYY-MM-DD" />
           </el-col>
         </el-row>
       </div>
@@ -103,7 +103,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="预计到货">
-          <el-date-picker v-model="poForm.expected_delivery_date" type="date" style="width: 100%" />
+          <el-date-picker v-model="poForm.expected_delivery_date" type="date" style="width: 100%" value-format="YYYY-MM-DD" />
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="poForm.remark" type="textarea" :rows="2" />

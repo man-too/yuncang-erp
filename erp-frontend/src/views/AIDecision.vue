@@ -11,9 +11,12 @@
     </el-row>
 
     <!-- 采购决策 -->
-    <el-button type="primary" size="small" style="margin-bottom: 12px;" @click="purchaseStore.isExpanded = !purchaseStore.isExpanded">
-      🚀 采购决策生成
-    </el-button>
+    <div style="margin-bottom: 12px;">
+      <el-button type="primary" size="small" @click="purchaseStore.isExpanded = !purchaseStore.isExpanded">
+        🚀 采购决策生成
+      </el-button>
+    </div>
+
     <PurchaseDecisionWizard v-if="purchaseStore.isExpanded" style="margin-bottom: 12px;" @close="purchaseStore.close()" />
 
     <!-- AI 对话 -->
@@ -58,7 +61,7 @@ const summaryCards = shallowReactive([
   { title: 'AI 决策总数', value: 0 },
   { title: '高置信度建议', value: 0 },
   { title: '库存预警', value: 0 },
-  { title: '库存异常', value: 0 },
+  { title: '库存总项', value: 0 },
 ])
 
 const typeTag = (t: string) => ({ stock_alert: 'danger', sales_forecast: 'warning', supplier_recommend: 'success' }[t] || 'info')

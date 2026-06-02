@@ -13,17 +13,9 @@
       <el-step v-for="(label, i) in store.stepLabels" :key="i" :title="label" />
     </el-steps>
 
-    <!-- 左右分栏内容 -->
+    <!-- 单组件内容区 -->
     <div class="wizard-body">
-      <!-- 左侧图表 -->
-      <div class="left-panel">
-        <component :is="currentChartComp" />
-      </div>
-
-      <!-- 右侧操作 -->
-      <div class="right-panel">
-        <component :is="currentTableComp" />
-      </div>
+      <component :is="currentStepComp" />
     </div>
   </el-card>
 </template>
@@ -31,25 +23,21 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { usePurchaseDecisionStore } from '@/stores/purchaseDecision'
-
-// Use components: step containers render both chart + table in their slot
 import StepInventory from './steps/StepInventory.vue'
+import StepRisk from './steps/StepRisk.vue'
+import StepSupplier from './steps/StepSupplier.vue'
+import StepForecast from './steps/StepForecast.vue'
 import StepSummary from './steps/StepSummary.vue'
 
-const emit = defineEmits<{ close: [] }>()
+defineEmits<{ close: [] }>()
 const store = usePurchaseDecisionStore()
 
-// Simplified for Phase 2: Step0 = Inventory, Step4 = Summary
-// Steps 1-3 render the chart/table from the same component
-const currentChartComp = computed(() => {
+const currentStepComp = computed(() => {
   switch (store.currentStep) {
     case 0: return StepInventory
-    default: return StepInventory
-  }
-})
-
-const currentTableComp = computed(() => {
-  switch (store.currentStep) {
+    case 1: return StepRisk
+    case 2: return StepSupplier
+    case 3: return StepForecast
     case 4: return StepSummary
     default: return StepInventory
   }
@@ -79,16 +67,7 @@ const currentTableComp = computed(() => {
   color: #909399;
 }
 .wizard-body {
-  display: flex;
-  gap: 20px;
   min-height: 420px;
-}
-.left-panel {
-  flex: 1;
-  min-width: 0;
-}
-.right-panel {
-  width: 440px;
-  flex-shrink: 0;
+  width: 100%;
 }
 </style>
