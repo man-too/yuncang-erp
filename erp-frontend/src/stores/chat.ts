@@ -37,10 +37,17 @@ export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([])
   const isLoading = ref(false)
 
+  function uuid() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16)
+    })
+  }
+
   function addMessage(msg: Omit<ChatMessage, 'id' | 'timestamp'>) {
     messages.value.push({
       ...msg,
-      id: crypto.randomUUID(),
+      id: uuid(),
       timestamp: Date.now(),
     })
   }
