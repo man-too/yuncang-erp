@@ -3,9 +3,8 @@
     <div class="login-card">
       <div class="login-brand">
         <div class="login-brand-icon">📦</div>
-        <h1 class="login-brand-name">供应链ERP</h1>
+        <h1 class="login-brand-name">供应链ERP管理系统</h1>
       </div>
-      <h2 class="login-title">{{ isRegister ? '创建账号' : '登录系统' }}</h2>
       <el-form ref="formRef" :model="form" :rules="rules" label-width="0" size="large">
         <el-form-item prop="username">
           <el-input v-model="form.username" placeholder="用户名" prefix-icon="User" />
@@ -85,78 +84,46 @@ const handleLogin = async () => {
 </script>
 
 <style scoped>
-/* ===================== Container ===================== */
+/* 领星风格登录页 — 白底，简洁 */
 .login-container {
   height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: var(--bg-sidebar);
-  background-image:
-    radial-gradient(circle at 15% 30%, rgba(255, 255, 255, 0.03) 0%, transparent 50%),
-    radial-gradient(circle at 85% 70%, rgba(200, 152, 60, 0.06) 0%, transparent 50%),
-    radial-gradient(circle at 50% 50%, rgba(30, 58, 95, 0.4) 0%, transparent 70%);
+  background-color: var(--bg-page);
 }
 
-/* ===================== Card ===================== */
 .login-card {
-  width: 420px;
-  padding: 44px 40px 36px;
+  width: 400px;
+  padding: 40px 36px;
   background: var(--bg-card);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
+  border-radius: var(--radius-md);
   border: 1px solid var(--border-light);
 }
 
-/* ===================== Brand Section ===================== */
 .login-brand {
   display: flex;
   flex-direction: column;
   align-items: center;
-  margin-bottom: 28px;
+  margin-bottom: 32px;
 }
 
 .login-brand-icon {
-  font-size: 40px;
-  line-height: 1;
+  font-size: 36px;
   margin-bottom: var(--spacing-sm);
 }
 
 .login-brand-name {
   font-size: var(--font-size-2xl);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-medium);
   color: var(--text-primary);
   margin: 0;
-  letter-spacing: 1px;
 }
 
-/* ===================== Title ===================== */
-.login-title {
-  text-align: center;
-  margin-bottom: 28px;
-  color: var(--text-regular);
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-medium);
-  position: relative;
-}
-
-.login-title::after {
-  content: '';
-  display: block;
-  width: 36px;
-  height: 3px;
-  background: var(--color-accent);
-  margin: 10px auto 0;
-  border-radius: 2px;
-}
-
-/* ===================== Submit Button ===================== */
 .login-submit {
   width: 100%;
-  margin-top: var(--spacing-sm);
 }
 
-/* ===================== Footer ===================== */
 .login-footer {
   text-align: center;
   margin-top: var(--spacing-sm);

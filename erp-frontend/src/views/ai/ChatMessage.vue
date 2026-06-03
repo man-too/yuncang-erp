@@ -237,8 +237,8 @@ function hasValidChartData(block: MessageBlock): boolean {
   align-items: center; justify-content: center; font-size: 13px; font-weight: 600;
   flex-shrink: 0; color: #fff;
 }
-.chat-message.user .msg-avatar { background: linear-gradient(135deg, #1E3A5F, #2A4F7F); }
-.chat-message.assistant .msg-avatar { background: linear-gradient(135deg, #4A7A9E, #1E3A5F); }
+.chat-message.user .msg-avatar { background: linear-gradient(135deg, #005BF5, #2e7bff); }
+.chat-message.assistant .msg-avatar { background: linear-gradient(135deg, #55585F, #005BF5); }
 
 .msg-body { flex: 1; min-width: 0; }
 .msg-bubble {

@@ -1,13 +1,14 @@
 /* ========================================
-   全局样式深覆盖 — Element Plus 组件级微调
+   全局样式 — 领星ERP风格
+   白底高密度，#005BF5蓝，4px圆角，极小阴影
    ======================================== */
 
-/* ----- 全局字体 & 基础 ----- */
+/* ----- 全局基础 ----- */
 html, body {
   font-family: var(--font-family);
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-sm);
   color: var(--text-regular);
-  background-color: var(--bg-page);
+  background-color: var(--bg-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -15,95 +16,104 @@ html, body {
 /* ----- 页面标题 ----- */
 h2 {
   color: var(--text-primary);
-  font-weight: var(--font-weight-semibold);
+  font-weight: var(--font-weight-medium);
+  font-size: var(--font-size-xl);
 }
 
 /* ===================== Sidebar Menu ===================== */
-
-/* 侧边栏菜单项 — 激活时金色左边框 */
+/* 领星侧边栏: 深底 #0b1019, 文字 #A0A4A7, 激活白字+蓝色左边框 */
 .el-menu-item.is-active {
-  border-left: 3px solid var(--color-accent) !important;
+  border-left: 3px solid var(--color-primary) !important;
   background-color: var(--bg-sidebar-active) !important;
+  color: var(--text-sidebar-active) !important;
 }
 
 .el-menu-item:hover,
 .el-sub-menu__title:hover {
   background-color: var(--bg-sidebar-hover) !important;
+  color: var(--text-sidebar-active) !important;
 }
 
-/* 折叠状态下边栏菜单 hover */
 .el-menu--collapse .el-menu-item:hover {
   background-color: var(--bg-sidebar-hover) !important;
 }
 
-/* ===================== Table ===================== */
+/* ===================== Header ===================== */
+.el-header {
+  border-bottom: 1px solid var(--border-light);
+}
 
-/* 表头样式 */
+/* ===================== Table ===================== */
 .el-table th.el-table__cell {
   background-color: var(--table-header-bg) !important;
-  color: var(--text-primary) !important;
-  font-weight: var(--font-weight-semibold) !important;
+  color: var(--text-regular) !important;
+  font-weight: var(--font-weight-medium) !important;
   font-size: var(--font-size-sm) !important;
   border-bottom: 1px solid var(--table-border) !important;
 }
 
-/* 表格斑马纹 */
 .el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
   background-color: var(--table-stripe);
 }
 
-/* 表格 hover */
 .el-table__body tr:hover > td.el-table__cell {
   background-color: var(--table-hover) !important;
 }
 
-/* 表格行边框 */
-.el-table td.el-table__cell {
-  border-bottom: 1px solid var(--border-lighter);
+.el-table td.el-table__cell,
+.el-table th.el-table__cell {
+  font-size: var(--font-size-sm);
 }
 
-/* ===================== Card ===================== */
-
-/* 卡片阴影统一 */
+/* ===================== Card — 极简风格 ===================== */
 .el-card {
-  border: 1px solid var(--border-color);
-  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-light);
+  box-shadow: none;
+  border-radius: var(--radius-md);
 }
 
-.el-card.is-hover-shadow:hover,
-.el-card.is-always-shadow {
-  box-shadow: var(--shadow-md);
+.el-card__header {
+  border-bottom: 1px solid var(--border-light);
+  padding: var(--spacing-md) var(--card-padding);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
 }
 
 /* ===================== Filter Bar ===================== */
-
-/* 统一的筛选栏类名 */
 .filter-bar {
   background: var(--bg-filter);
-  padding: var(--spacing-lg);
+  padding: var(--spacing-md) var(--spacing-lg);
   border-radius: var(--radius-md);
   margin-bottom: var(--spacing-lg);
-  border: 1px solid var(--border-color);
+  border: none;
 }
 
-/* ===================== Button Refinements ===================== */
+/* ===================== Buttons ===================== */
+.el-button {
+  font-size: var(--font-size-sm);
+  border-radius: var(--radius-md);
+}
 
 .el-button--default {
   border-color: var(--border-color);
   color: var(--text-regular);
+  background-color: var(--bg-card);
 }
 
 .el-button--default:hover {
   border-color: var(--color-primary);
   color: var(--color-primary);
+  background-color: var(--color-primary-bg);
 }
 
-/* 文字按钮 */
 .el-button.is-text:hover {
-  background-color: var(--bg-page);
+  background-color: var(--bg-filter);
 }
 
 /* ===================== Breadcrumb ===================== */
+.el-breadcrumb {
+  font-size: var(--font-size-sm);
+}
 
 .el-breadcrumb__inner.is-link {
   color: var(--text-secondary);
@@ -114,22 +124,30 @@ h2 {
 }
 
 /* ===================== Dialog ===================== */
+.el-dialog {
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
 
 .el-dialog__header {
   border-bottom: 1px solid var(--border-light);
-  padding-bottom: var(--spacing-lg);
-  margin-bottom: var(--spacing-lg);
+  padding-bottom: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
 }
 
 .el-dialog__footer {
   border-top: 1px solid var(--border-light);
-  padding-top: var(--spacing-lg);
+  padding-top: var(--spacing-md);
 }
 
 /* ===================== Pagination ===================== */
+.el-pagination {
+  font-size: var(--font-size-sm);
+}
 
 .el-pagination .el-pager li.is-active {
   background-color: var(--color-primary);
+  color: #fff;
 }
 
 .el-pagination .el-pager li:hover {
@@ -137,9 +155,17 @@ h2 {
 }
 
 /* ===================== Form ===================== */
+.el-form-item__label {
+  font-size: var(--font-size-sm);
+  color: var(--text-regular);
+}
+
+.el-input__inner {
+  font-size: var(--font-size-sm);
+}
 
 .el-input__wrapper {
-  box-shadow: 0 0 0 1px var(--border-color) inset;
+  box-shadow: 0 0 0 1px var(--border-input) inset;
 }
 
 .el-input__wrapper:hover {
@@ -147,7 +173,6 @@ h2 {
 }
 
 /* ===================== DatePicker ===================== */
-
 .el-date-table td.current:not(.disabled) .el-date-table-cell__text {
   background-color: var(--color-primary) !important;
 }
@@ -157,28 +182,18 @@ h2 {
 }
 
 /* ===================== Tag ===================== */
-
-.el-tag--primary {
-  --el-tag-bg-color: var(--color-info-bg);
-  --el-tag-border-color: var(--color-info-light);
-  --el-tag-text-color: var(--color-primary);
+.el-tag {
+  border-radius: 2px;
+  font-size: var(--font-size-xs);
 }
 
 /* ===================== Dropdown ===================== */
-
 .el-dropdown-menu__item:hover {
   color: var(--color-primary) !important;
-  background-color: var(--bg-page) !important;
-}
-
-/* ===================== Timeline (Dashboard) ===================== */
-
-.el-timeline-item__node--primary {
-  background-color: var(--color-primary);
+  background-color: var(--bg-filter) !important;
 }
 
 /* ===================== Scrollbar ===================== */
-
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -190,15 +205,14 @@ h2 {
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-disabled);
+  background: var(--text-placeholder);
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--bg-scrollbar);
 }
 
-/* ===================== Selection (Table Checkbox) ===================== */
-
+/* ===================== Checkbox & Select ===================== */
 .el-checkbox__input.is-checked .el-checkbox__inner {
   background-color: var(--color-primary);
   border-color: var(--color-primary);
@@ -209,15 +223,12 @@ h2 {
   border-color: var(--color-primary);
 }
 
-/* ===================== Select Dropdown ===================== */
-
 .el-select-dropdown__item.selected,
 .el-select-dropdown__item:hover {
   color: var(--color-primary);
 }
 
 /* ===================== Tabs ===================== */
-
 .el-tabs__active-bar {
   background-color: var(--color-primary);
 }
@@ -227,23 +238,15 @@ h2 {
   color: var(--color-primary);
 }
 
-/* ===================== Tooltip ===================== */
-
-.el-tooltip__trigger:focus-visible {
-  outline-color: var(--color-primary);
-}
-
 /* ===================== Progress ===================== */
-
 .el-progress-bar__inner {
   background-color: var(--color-primary);
 }
 
 /* ===================== Step Wizard ===================== */
-
 .el-step__title.is-process {
   color: var(--color-primary);
-  font-weight: var(--font-weight-semibold);
+  font-weight: var(--font-weight-medium);
 }
 
 .el-step__head.is-process {
@@ -256,19 +259,34 @@ h2 {
 }
 
 /* ===================== Empty State ===================== */
-
 .el-empty__description p {
   color: var(--text-secondary);
-}
-
-/* ===================== Link ===================== */
-
-.el-link.el-link--primary {
-  --el-link-text-color: var(--color-primary);
+  font-size: var(--font-size-sm);
 }
 
 /* ===================== Message Box ===================== */
+.el-message-box {
+  border-radius: var(--radius-md);
+}
 
 .el-message-box__headerbtn:hover .el-message-box__close {
   color: var(--color-primary);
+}
+
+/* ===================== Popover ===================== */
+.el-popover {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-lighter);
+  box-shadow: var(--shadow-popover);
+  font-size: var(--font-size-sm);
+}
+
+/* ===================== Link ===================== */
+.el-link.el-link--primary {
+  font-size: var(--font-size-sm);
+}
+
+/* ===================== Tooltip ===================== */
+.el-tooltip__trigger:focus-visible {
+  outline-color: var(--color-primary);
 }

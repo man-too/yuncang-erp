@@ -236,7 +236,7 @@ const chartOption = computed(() => {
         showSymbol: true,
         symbol: 'circle',
         symbolSize: 6,
-        lineStyle: { color: '#1E3A5F', width: 2 },
+        lineStyle: { color: '#005BF5', width: 2 },
       },
       {
         name: '预测销量',
@@ -424,7 +424,7 @@ onMounted(() => {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #1E3A5F, #2A4F7F);
+  background: linear-gradient(135deg, #005BF5, #2e7bff);
   color: #fff;
   display: flex;
   align-items: center;

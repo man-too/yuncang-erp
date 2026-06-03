@@ -207,7 +207,7 @@ const supplierChartOption = computed(() => {
       data: ratings.map((v: number) => ({
         value: v,
         itemStyle: {
-          color: v >= 4 ? '#2D8C4A' : v >= 3 ? '#D4840A' : '#C53030',
+          color: v >= 4 ? '#2D8C4A' : v >= 3 ? '#F27A00' : '#C53030',
         },
       })),
       label: { show: true, position: 'top', formatter: '{c}' },
@@ -339,7 +339,7 @@ onMounted(async () => {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #1E3A5F, #2A4F7F);
+  background: linear-gradient(135deg, #005BF5, #2e7bff);
   color: #fff;
   display: flex;
   align-items: center;

@@ -127,7 +127,7 @@ onMounted(() => {
   width: 36px; height: 36px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-size: 13px; font-weight: 600; color: #fff;
-  background: linear-gradient(135deg, #1E3A5F, #2A4F7F);
+  background: linear-gradient(135deg, #005BF5, #2e7bff);
 }
 .typing-dots {
   display: flex; gap: 4px; align-items: center;

@@ -1,88 +1,102 @@
 /* ========================================
-   ERP 专业商务风 — 设计 Token 体系
+   ERP 设计 Token — 基于领星ERP lingxing-ui 4.60.8
+   来源: https://erp.lingxing.com/ CSS 提取
    ======================================== */
 
 :root {
   /* ===== Brand Colors ===== */
-  --color-primary: #1E3A5F;
-  --color-primary-light: #2A4F7F;
-  --color-primary-dark: #152840;
-  --color-accent: #C8983C;
-  --color-accent-light: #D4A855;
+  --color-primary: #005BF5;
+  --color-primary-light: #2e7bff;
+  --color-primary-dark: #0748b8;
+  --color-primary-bg: #E9F1FC;
+  --color-primary-bg-hover: rgba(0, 91, 245, 0.06);
+  --color-primary-bg-active: rgba(0, 91, 245, 0.10);
 
   /* ===== Semantic Colors ===== */
-  --color-success: #2D8C4A;
-  --color-success-light: #E6F4EA;
-  --color-success-bg: #F0F9F4;
-  --color-warning: #D4840A;
-  --color-warning-light: #FFF3E0;
-  --color-warning-bg: #FFF8F0;
-  --color-danger: #C53030;
-  --color-danger-light: #FDE8E8;
-  --color-danger-bg: #FEF2F2;
-  --color-info: #4A7A9E;
-  --color-info-light: #E8F0F6;
-  --color-info-bg: #F2F6FA;
+  --color-success: #00941E;
+  --color-success-light: #36C249;
+  --color-success-bg: rgba(0, 148, 30, 0.06);
+  --color-success-border: rgba(0, 148, 30, 0.15);
+  --color-warning: #F27A00;
+  --color-warning-light: #FF9B29;
+  --color-warning-bg: rgba(242, 122, 0, 0.06);
+  --color-warning-border: rgba(242, 122, 0, 0.15);
+  --color-danger: #E52E2E;
+  --color-danger-light: #FF5C5C;
+  --color-danger-bg: rgba(229, 46, 46, 0.06);
+  --color-danger-border: rgba(229, 46, 46, 0.15);
+  --color-info: #55585F;
+  --color-info-light: #888c94;
+  --color-info-bg: #F0F2F5;
+  --color-info-border: #e6e8eb;
 
-  /* ===== Backgrounds ===== */
-  --bg-page: #F7F8FA;
+  /* ===== Backgrounds — 领星是白底为主 ===== */
+  --bg-page: #F0F2F5;
   --bg-card: #FFFFFF;
-  --bg-sidebar: #152238;
+  --bg-body: #FFFFFF;
+  --bg-sidebar: #0b1019;
   --bg-sidebar-hover: rgba(255, 255, 255, 0.08);
-  --bg-sidebar-active: rgba(255, 255, 255, 0.12);
+  --bg-sidebar-active: rgba(0, 91, 245, 0.15);
   --bg-header: #FFFFFF;
-  --bg-filter: #FFFFFF;
+  --bg-filter: #F0F2F5;
   --bg-input: #FFFFFF;
+  --bg-disabled: #f5f6f9;
+  --bg-tooltip: #f5f6f9;
+  --bg-scrollbar: #ebedf0;
 
-  /* ===== Text ===== */
-  --text-primary: #1A1A2E;
-  --text-regular: #5A5A7A;
-  --text-secondary: #8E8EA0;
-  --text-disabled: #B0B0C0;
+  /* ===== Text — 领星暖灰体系 ===== */
+  --text-primary: #0b1019;
+  --text-regular: #33363C;
+  --text-secondary: #55585F;
+  --text-placeholder: #888c94;
+  --text-disabled: #A0A4A7;
+  --text-muted: #A6ABB4;
   --text-inverse: #FFFFFF;
-  --text-sidebar: #C8CDD5;
+  --text-sidebar: #A0A4A7;
   --text-sidebar-active: #FFFFFF;
 
-  /* ===== Borders ===== */
-  --border-color: #E2E4E9;
-  --border-light: #E8EAEF;
-  --border-lighter: #F0F1F5;
+  /* ===== Borders — 领星银灰系 ===== */
+  --border-color: #cad2e0;
+  --border-light: #e6e8eb;
+  --border-lighter: #EBEEF5;
+  --border-input: #cad2e0;
 
   /* ===== Table ===== */
-  --table-stripe: #F9F9FB;
-  --table-hover: #F0F4FA;
-  --table-header-bg: #F7F8FA;
-  --table-border: #E2E4E9;
+  --table-stripe: #fafbfc;
+  --table-hover: #E9F1FC;
+  --table-header-bg: #f5f6f9;
+  --table-border: #e6e8eb;
 
-  /* ===== Shadows ===== */
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.10);
-  --shadow-header: 0 1px 4px rgba(0, 0, 0, 0.06);
+  /* ===== Shadows — 领星极克制 ===== */
+  --shadow-sm: none;
+  --shadow-md: 0 2px 12px 0 rgba(0, 0, 0, 0.10);
+  --shadow-lg: 0 4px 16px -4px rgba(0, 0, 0, 0.20);
+  --shadow-header: none;
+  --shadow-popover: 0 4px 16px -4px rgba(0, 0, 0, 0.20);
 
-  /* ===== Radius ===== */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
+  /* ===== Radius — 领星4px标准 ===== */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 4px;
+  --radius-xl: 4px;
   --radius-full: 50%;
 
-  /* ===== Spacing (8px grid) ===== */
+  /* ===== Spacing ===== */
   --spacing-xs: 4px;
   --spacing-sm: 8px;
   --spacing-md: 12px;
   --spacing-lg: 16px;
   --spacing-xl: 24px;
 
-  /* ===== Typography ===== */
+  /* ===== Typography — 领星12px body, 高密度 ===== */
   --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --font-size-xs: 12px;
-  --font-size-sm: 13px;
-  --font-size-base: 14px;
-  --font-size-lg: 16px;
-  --font-size-xl: 18px;
-  --font-size-2xl: 22px;
-  --font-size-3xl: 28px;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 13px;
+  --font-size-lg: 14px;
+  --font-size-xl: 16px;
+  --font-size-2xl: 18px;
+  --font-size-3xl: 22px;
   --font-weight-normal: 400;
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
@@ -90,12 +104,12 @@
 
   /* ===== Transitions ===== */
   --transition-fast: 0.15s ease;
-  --transition-base: 0.2s ease;
+  --transition-base: 0.3s ease;
   --transition-slow: 0.3s ease;
 
   /* ===== Layout ===== */
   --sidebar-width: 220px;
   --sidebar-collapsed-width: 64px;
-  --header-height: 56px;
-  --card-padding: 20px;
+  --header-height: 48px;
+  --card-padding: 16px;
 }

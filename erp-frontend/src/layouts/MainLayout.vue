@@ -1,6 +1,6 @@
 <template>
   <el-container class="app-layout">
-    <!-- 侧边栏 -->
+    <!-- 侧边栏 — 领星深色风格 #0b1019 -->
     <el-aside :width="isCollapse ? '64px' : '220px'" class="app-sidebar">
       <div class="sidebar-logo" @click="router.push('/dashboard')">
         <span v-show="!isCollapse" class="sidebar-logo-text">📦 供应链ERP</span>
@@ -44,7 +44,7 @@
     </el-aside>
 
     <el-container>
-      <!-- 顶部栏 -->
+      <!-- 顶部栏 — 白底+底边框 -->
       <el-header class="app-header">
         <div class="header-left">
           <el-button :icon="isCollapse ? 'Expand' : 'Fold'" text @click="toggleCollapse" />
@@ -100,7 +100,7 @@ const logout = () => {
 </script>
 
 <style scoped>
-/* ===================== Layout Container ===================== */
+/* ===================== Layout ===================== */
 .app-layout {
   height: 100vh;
 }
@@ -120,27 +120,27 @@ const logout = () => {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   flex-shrink: 0;
 }
 
 .sidebar-logo-text {
   color: var(--text-inverse);
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
   white-space: nowrap;
 }
 
 .sidebar-logo-icon {
   color: var(--text-inverse);
-  font-size: var(--font-size-xl);
+  font-size: var(--font-size-lg);
 }
 
-/* Menu wrapper */
 .sidebar-menu {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  border-right: none;
 }
 
 .sidebar-menu:not(.el-menu--collapse) {
@@ -150,14 +150,12 @@ const logout = () => {
 /* ===================== Header ===================== */
 .app-header {
   background: var(--bg-header);
-  box-shadow: var(--shadow-header);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 var(--spacing-xl);
+  padding: 0 var(--spacing-lg);
   height: var(--header-height);
-  position: relative;
-  z-index: 1;
+  border-bottom: 1px solid var(--border-light);
 }
 
 .header-left {
@@ -166,7 +164,7 @@ const logout = () => {
 }
 
 .header-breadcrumb {
-  margin-left: var(--spacing-lg);
+  margin-left: var(--spacing-md);
 }
 
 .header-right {
@@ -180,14 +178,14 @@ const logout = () => {
   align-items: center;
   gap: var(--spacing-xs);
   color: var(--text-regular);
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-sm);
 }
 
 .header-user:hover {
   color: var(--color-primary);
 }
 
-/* ===================== Main Content ===================== */
+/* ===================== Main ===================== */
 .app-main {
   background: var(--bg-page);
   padding: var(--spacing-lg);
