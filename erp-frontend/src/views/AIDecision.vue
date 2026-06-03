@@ -19,6 +19,9 @@
 
     <PurchaseDecisionWizard v-if="purchaseStore.isExpanded" style="margin-bottom: 12px;" @close="purchaseStore.close()" />
 
+    <!-- AI 对话助手 -->
+    <DecisionChat @panel-focus="handlePanelFocus" />
+
     <!-- 决策历史 -->
     <el-collapse v-model="historyOpen" style="margin-top: 12px;">
       <el-collapse-item title="AI 决策历史" name="history">
@@ -46,6 +49,7 @@
 import { ref, onMounted, shallowReactive } from 'vue'
 import { aiApi } from '@/api'
 import PurchaseDecisionWizard from '@/views/ai/PurchaseDecisionWizard.vue'
+import DecisionChat from '@/views/ai/DecisionChat.vue'
 import { usePurchaseDecisionStore } from '@/stores/purchaseDecision'
 
 const purchaseStore = usePurchaseDecisionStore()
@@ -81,6 +85,10 @@ const fetchDashboard = async () => {
       summaryCards[3].value = res.total_inventory_items || 0
     }
   } catch (_) {}
+}
+
+const handlePanelFocus = (type: string) => {
+  if (type === 'purchase_advice') purchaseStore.isExpanded = true
 }
 
 onMounted(() => { fetchHistory(); fetchDashboard() })
