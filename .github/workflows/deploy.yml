@@ -13,12 +13,14 @@ jobs:
 
       - name: Package code
         run: |
-          mkdir -p deploy-pkg/erp-backend deploy-pkg/erp-frontend deploy-pkg/deploy
-          cp -r erp-backend/ deploy-pkg/erp-backend/
-          rsync -av --exclude=node_modules erp-frontend/ deploy-pkg/erp-frontend/
-          cp -r deploy/ deploy-pkg/deploy/
-          cp docker-compose.yml deploy-pkg/
-          tar czf code.tar.gz -C deploy-pkg .
+          tar czf code.tar.gz \
+            --exclude='erp-backend/__pycache__' \
+            --exclude='erp-backend/*.pyc' \
+            --exclude='erp-backend/.env' \
+            --exclude='erp-backend/uvicorn' \
+            --exclude='erp-frontend/node_modules' \
+            --exclude='erp-frontend/dist' \
+            erp-backend erp-frontend docker-compose.yml
 
       - name: Copy to server
         uses: appleboy/scp-action@v0.1.7
