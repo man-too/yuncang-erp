@@ -284,13 +284,18 @@ async function onProductChange() {
         confidence: pred.confidence ?? (typeof parsed === 'object' ? parsed?.confidence : undefined) ?? 0,
       }
 
+      const lastDate =
+        historyData.value.length > 0
+          ? historyData.value[historyData.value.length - 1].date
+          : null
       if (parsed?.predictions && Array.isArray(parsed.predictions)) {
         predictionData.value = parsed.predictions
-        const lastDate =
-          historyData.value.length > 0
-            ? historyData.value[historyData.value.length - 1].date
-            : null
         predictionDates.value = getFutureDates(lastDate, parsed.predictions.length)
+      } else if (parsed?.forecast_next_30d) {
+        // AI returns single number, generate 7-day distributed predictions
+        const dailyAvg = Math.round(parsed.forecast_next_30d / 30)
+        predictionData.value = Array.from({ length: 7 }, () => dailyAvg)
+        predictionDates.value = getFutureDates(lastDate, 7)
       }
     }
   } catch {
