@@ -1,80 +1,84 @@
 /* ========================================
-   Element Plus 主题覆写 — 领星ERP风格
-   基于 lingxing-ui@4.60.8 CSS 提取的真实Token
+   Element Plus Theme Override — Deep Navy Professional
+   Primary: #1B3A5C  |  Body: 13px  |  Radius: 4px/2px
    ======================================== */
 
 @forward 'element-plus/theme-chalk/src/common/var.scss' with (
+
   /* ----- Brand Colors ----- */
   $colors: (
     'primary': (
-      'base': #005BF5,
+      'base': #1B3A5C,
     ),
     'success': (
-      'base': #00941E,
+      'base': #3B8C5C,
     ),
     'warning': (
-      'base': #F27A00,
+      'base': #C88C34,
     ),
     'danger': (
-      'base': #E52E2E,
+      'base': #C0393C,
     ),
     'error': (
-      'base': #E52E2E,
+      'base': #C0393C,
     ),
     'info': (
-      'base': #55585F,
+      'base': #5C7C9A,
     ),
   ),
 
-  /* ----- Text Colors (领星暖灰) ----- */
+  /* ----- Text Colors (warm gray) ----- */
   $text-color: (
-    'primary': #0b1019,
-    'regular': #33363C,
-    'secondary': #55585F,
-    'placeholder': #888c94,
-    'disabled': #A0A4A7,
+    'primary': #1A1D23,
+    'regular': #4A4F58,
+    'secondary': #7C828D,
+    'placeholder': #A0A5AE,
+    'disabled': #BCC1C9,
   ),
 
   /* ----- Border Colors ----- */
   $border-color: (
-    'base': #cad2e0,
-    'light': #e6e8eb,
-    'lighter': #EBEEF5,
-    'extra-light': #f5f6f9,
-    'dark': #A6ABB4,
+    '': #D1D5DB,
+    'light': #E5E7EB,
+    'lighter': #EEF0F2,
+    'extra-light': #F2F4F6,
+    'dark': #9CA3AF,
+    'darker': #7C828D,
   ),
-  $border-width: 1px,
-  $border-style: solid,
 
   /* ----- Fill Colors ----- */
   $fill-color: (
+    '': #F2F4F6,
+    'light': #F5F6F8,
+    'lighter': #F8F9FA,
+    'extra-light': #FBFCFD,
+    'dark': #E8EAED,
+    'darker': #D1D5DB,
     'blank': #FFFFFF,
-    'light': #F0F2F5,
-    'lighter': #f5f6f9,
   ),
 
   /* ----- Background Colors ----- */
   $bg-color: (
-    'base': #F0F2F5,
-    'page': #F0F2F5,
+    '': #FFFFFF,
+    'page': #F2F4F6,
     'overlay': #FFFFFF,
   ),
 
-  /* ----- Font — 领星12px base ===== */
+  /* ----- Font ----- */
   $font-family: (
     '':
       "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif",
   ),
   $font-size: (
-    'extra-large': 18px,
-    'large': 16px,
-    'medium': 14px,
+    'extra-large': 22px,
+    'large': 18px,
+    'medium': 16px,
     'base': 13px,
     'small': 12px,
     'extra-small': 11px,
   ),
 
-  /* ----- Border Radius — 领星4px标准，2px紧凑 ===== */
+  /* ----- Border Radius ----- */
   $border-radius: (
     'base': 4px,
     'small': 2px,
@@ -82,204 +86,247 @@
     'circle': 100%,
   ),
 
-  /* ----- Box Shadow — 领星极克制 ===== */
+  /* ----- Box Shadow — Minimal ----- */
   $box-shadow: (
-    'light': 0 2px 12px 0 rgba(0, 0, 0, 0.10),
-    'base': 0 4px 16px -4px rgba(0, 0, 0, 0.20),
-    'dark': 0 8px 16px 0 rgba(0, 0, 0, 0.16),
-    'lighter': none,
+    '': (
+      0 1px 3px rgba(0, 0, 0, 0.06),
+    ),
+    'light': (
+      0 4px 16px -4px rgba(0, 0, 0, 0.15),
+    ),
+    'lighter': (
+      0 1px 3px rgba(0, 0, 0, 0.06),
+    ),
+    'dark': (
+      0 4px 16px -4px rgba(0, 0, 0, 0.15),
+    ),
   ),
 
-  /* ----- Menu ===== */
+  /* ----- Menu (Sidebar) ----- */
   $menu: (
     'active-color': #FFFFFF,
-    'bg-color': #0b1019,
-    'text-color': #A0A4A7,
-    'hover-color': #FFFFFF,
+    'text-color': #7C828D,
+    'hover-text-color': #FFFFFF,
+    'bg-color': #121826,
+    'hover-bg-color': rgba(255, 255, 255, 0.06),
     'item-height': 48px,
     'sub-item-height': 44px,
+    'horizontal-height': 48px,
+    'horizontal-sub-item-height': 40px,
+    'item-font-size': 13px,
+    'item-hover-fill': rgba(27, 58, 92, 0.15),
+    'border-color': transparent,
+    'base-level-padding': 20px,
+    'level-padding': 20px,
+    'icon-width': 24px,
   ),
 
-  /* ----- Header — 领星48px ===== */
+  /* ----- Header ----- */
   $header: (
-    'bg-color': #FFFFFF,
-    'text-color': #0b1019,
-    'height': 48px,
     'padding': 0 20px,
+    'height': 48px,
   ),
 
-  /* ----- Main ===== */
+  /* ----- Main ----- */
   $main: (
     'padding': 16px,
   ),
 
-  /* ----- Button — 领星风格 ===== */
+  /* ----- Button ----- */
   $button: (
     'font-weight': 400,
-    'font-size': 12px,
   ),
   $button-border-radius: (
-    'base': 4px,
-    'small': 4px,
-    'round': 4px,
+    'large': 4px,
+    'default': 4px,
+    'small': 2px,
   ),
   $button-padding-vertical: (
-    'default': 8px,
+    'large': 10px,
+    'default': 7px,
     'small': 5px,
   ),
   $button-padding-horizontal: (
-    'default': 16px,
-    'small': 12px,
+    'large': 20px,
+    'default': 15px,
+    'small': 11px,
   ),
   $button-font-size: (
-    'default': 12px,
+    'large': 13px,
+    'default': 13px,
     'small': 12px,
   ),
 
-  /* ----- Input ===== */
+  /* ----- Input ----- */
   $input: (
+    'text-color': #4A4F58,
+    'border-color': #D1D5DB,
     'border-radius': 4px,
-    'border-color': #cad2e0,
-    'hover-border-color': #005BF5,
-    'focus-border-color': #005BF5,
-    'font-size': 12px,
+    'bg-color': #FFFFFF,
+    'icon-color': #A0A5AE,
+    'placeholder-color': #A0A5AE,
+    'hover-border-color': #1B3A5C,
+    'clear-hover-color': #7C828D,
+    'focus-border-color': #1B3A5C,
   ),
 
-  /* ----- Select ===== */
+  /* ----- Select ----- */
   $select: (
-    'border-color-hover': #005BF5,
-    'input-focus-border-color': #005BF5,
+    'border-color-hover': #1B3A5C,
+    'input-focus-border-color': #1B3A5C,
   ),
 
-  /* ----- Table ===== */
+  /* ----- Table ----- */
   $table: (
-    'border-color': #e6e8eb,
-    'text-color': #33363C,
-    'header-text-color': #33363C,
-    'row-hover-bg-color': #E9F1FC,
-    'header-bg-color': #f5f6f9,
+    'border-color': #E5E7EB,
+    'text-color': #4A4F58,
+    'header-text-color': #4A4F58,
+    'row-hover-bg-color': #EEF2F8,
+    'current-row-bg-color': rgba(27, 58, 92, 0.06),
+    'header-bg-color': #F2F4F6,
+    'bg-color': #FFFFFF,
+    'tr-bg-color': #FFFFFF,
+    'expanded-cell-bg-color': #FFFFFF,
   ),
   $table-padding: (
-    'default': 8px,
+    'large': 12px 0,
+    'default': 8px 0,
+    'small': 4px 0,
   ),
   $table-cell-padding: (
-    'default': 8px 12px,
+    'large': 0 16px,
+    'default': 0 12px,
+    'small': 0 8px,
   ),
   $table-font-size: (
-    'default': 12px,
+    'large': 13px,
+    'default': 13px,
+    'small': 12px,
   ),
 
-  /* ----- Tag ===== */
+  /* ----- Tag ----- */
   $tag: (
-    'border-radius': 2px,
     'font-size': 11px,
+    'border-radius': 2px,
+    'border-radius-rounded': 9999px,
   ),
   $tag-height: (
+    'large': 28px,
     'default': 22px,
+    'small': 20px,
   ),
 
-  /* ----- Dialog ===== */
+  /* ----- Dialog ----- */
   $dialog: (
-    'border-radius': 4px,
     'padding-primary': 16px,
-    'box-shadow': 0 4px 16px -4px rgba(0, 0, 0, 0.20),
-  ),
-
-  /* ----- Card ===== */
-  $card: (
     'border-radius': 4px,
-    'border-color': #e6e8eb,
-    'bg-color': #FFFFFF,
+  ),
+
+  /* ----- Card ----- */
+  $card: (
+    'border-color': #E5E7EB,
+    'border-radius': 4px,
     'padding': 16px,
+    'bg-color': #FFFFFF,
   ),
 
-  /* ----- Pagination ===== */
+  /* ----- Pagination ----- */
   $pagination: (
-    'button-bg-color': #FFFFFF,
-    'hover-color': #005BF5,
-    'font-size': 12px,
+    'font-size': 13px,
+    'hover-color': #1B3A5C,
+    'button-bg-color': #F2F4F6,
+    'button-disabled-bg-color': #F2F4F6,
   ),
 
-  /* ----- Slider ===== */
+  /* ----- Slider ----- */
   $slider: (
-    'main-bg-color': #005BF5,
-    'runway-bg-color': #e6e8eb,
+    'main-bg-color': #1B3A5C,
+    'runway-bg-color': #E5E7EB,
   ),
 
-  /* ----- Switch ===== */
+  /* ----- Switch ----- */
   $switch: (
-    'on-color': #00941E,
-    'off-color': #cad2e0,
+    'on-color': #3B8C5C,
+    'off-color': #D1D5DB,
   ),
 
-  /* ----- Tabs ===== */
+  /* ----- Tabs ----- */
   $tabs: (
-    'active-color': #005BF5,
+    'header-height': 40px,
   ),
 
-  /* ----- Date Editor ===== */
+  /* ----- Date Editor ----- */
   $date-editor: (
-    'active-range-bg-color': #E9F1FC,
+    'width': 220px,
+    'monthrange-width': 300px,
+    'daterange-width': 350px,
+    'datetimerange-width': 400px,
   ),
 
-  /* ----- Radio ===== */
+  /* ----- Radio ----- */
   $radio: (
-    'input-bg-color': #FFFFFF,
-    'input-border': solid,
-    'input-border-color': #cad2e0,
-    'input-border-color-hover': #005BF5,
     'input-height': 14px,
     'input-width': 14px,
+    'input-border-color': #D1D5DB,
+    'input-border-color-hover': #1B3A5C,
   ),
   $radio-checked: (
-    'input-border-color': #005BF5,
-    'text-color': #005BF5,
+    'text-color': #1B3A5C,
+    'input-border-color': #1B3A5C,
+    'icon-color': #1B3A5C,
   ),
-  /* ----- Checkbox ===== */
+
+  /* ----- Checkbox ----- */
   $checkbox: (
-    'checked-bg-color': #005BF5,
-    'checked-input-border-color': #005BF5,
-    'input-border-color-hover': #005BF5,
+    'input-height': 14px,
+    'input-width': 14px,
+    'checked-text-color': #1B3A5C,
+    'checked-input-border-color': #1B3A5C,
+    'checked-bg-color': #1B3A5C,
+    'input-border-color-hover': #1B3A5C,
   ),
 
-  /* ----- Loading ===== */
+  /* ----- Loading ----- */
   $loading: (
-    'spinner-color': #005BF5,
+    'spinner-size': 42px,
+    'fullscreen-spinner-size': 50px,
   ),
 
-  /* ----- Timeline ===== */
+  /* ----- Timeline ----- */
   $timeline: (
-    'node-color': #cad2e0,
+    'node-color': #D1D5DB,
   ),
 
-  /* ----- Link ===== */
+  /* ----- Link ----- */
   $link: (
-    'text-color': #005BF5,
-    'hover-text-color': #2e7bff,
-    'font-size': 12px,
+    'font-size': 13px,
+    'text-color': #1B3A5C,
+    'hover-text-color': #2D5F8A,
   ),
 
-  /* ----- Popover ===== */
+  /* ----- Popup ----- */
   $popup: (
-    'modal-bg-color': rgba(0, 0, 0, 0.4),
-  ),
-  $popover: (
-    'border-radius': 4px,
-    'border-color': #EBEEF5,
-    'padding': 12px,
-    'font-size': 12px,
+    'modal-bg-color': #000000,
+    'modal-opacity': 0.4,
   ),
 
-  /* ----- Popper (Dropdown) ===== */
+  /* ----- Popover ----- */
+  $popover: (
+    'font-size': 13px,
+    'border-color': #EEF0F2,
+    'padding': 12px,
+    'border-radius': 4px,
+  ),
+
+  /* ----- Popper ----- */
   $popper: (
     'border-radius': 4px,
-    'border-color': #EBEEF5,
   ),
 
-  /* ----- Dropdown ===== */
+  /* ----- Dropdown ----- */
   $dropdown: (
-    'menuItem-hover-fill': #F0F2F5,
-    'menuItem-hover-color': #005BF5,
+    'menuItem-hover-fill': #F2F4F6,
+    'menuItem-hover-color': #1B3A5C,
   ),
 
 );

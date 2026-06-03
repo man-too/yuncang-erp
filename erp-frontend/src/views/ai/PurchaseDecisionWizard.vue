@@ -2,7 +2,7 @@
   <el-card shadow="never" class="wizard-card">
     <div class="wizard-header">
       <div class="wizard-title">
-        <span style="font-size: 18px; font-weight: 600;">🚀 采购决策生成</span>
+        <span style="font-size: 18px; font-weight: 600;">采购决策生成</span>
         <span class="wizard-subtitle">逐步完成采购计划</span>
       </div>
       <el-button text @click="$emit('close')">✕ 关闭</el-button>

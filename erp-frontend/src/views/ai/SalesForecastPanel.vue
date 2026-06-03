@@ -16,11 +16,11 @@
     <!-- 切换按钮 -->
     <div style="display: flex; justify-content: center; gap: 12px; margin-bottom: 12px;">
       <div class="toggle-btn" :class="{ active: activeView === 'history' }" @click="activeView = 'history'">
-        <span class="toggle-icon">📈</span>
+        <el-icon class="toggle-icon"><TrendCharts /></el-icon>
         <span class="toggle-label">历史销量</span>
       </div>
       <div class="toggle-btn" :class="{ active: activeView === 'forecast' }" @click="activeView = 'forecast'">
-        <span class="toggle-icon">🔮</span>
+        <el-icon class="toggle-icon"><DataAnalysis /></el-icon>
         <span class="toggle-label">预测销量（LLM）</span>
       </div>
     </div>
@@ -48,6 +48,7 @@ import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, TitleComponent } from 'echarts/components'
+import { TrendCharts, DataAnalysis } from '@element-plus/icons-vue'
 import { productApi, aiApi } from '@/api'
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, TitleComponent])

@@ -1,27 +1,27 @@
 /* ========================================
-   全局样式 — 领星ERP风格
-   白底高密度，#005BF5蓝，4px圆角，极小阴影
+   Global Styles — Deep Navy Professional Theme
+   References tokens.css via var(--xxx)
    ======================================== */
 
-/* ----- 全局基础 ----- */
-html, body {
+/* ----- Body ----- */
+html,
+body {
   font-family: var(--font-family);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-base);
   color: var(--text-regular);
-  background-color: var(--bg-body);
+  background-color: var(--bg-page);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ----- 页面标题 ----- */
+/* ----- Page Title ----- */
 h2 {
   color: var(--text-primary);
   font-weight: var(--font-weight-medium);
-  font-size: var(--font-size-xl);
 }
 
 /* ===================== Sidebar Menu ===================== */
-/* 领星侧边栏: 深底 #0b1019, 文字 #A0A4A7, 激活白字+蓝色左边框 */
+/* Dark sidebar: active item gets a blue left border accent */
 .el-menu-item.is-active {
   border-left: 3px solid var(--color-primary) !important;
   background-color: var(--bg-sidebar-active) !important;
@@ -38,17 +38,11 @@ h2 {
   background-color: var(--bg-sidebar-hover) !important;
 }
 
-/* ===================== Header ===================== */
-.el-header {
-  border-bottom: 1px solid var(--border-light);
-}
-
 /* ===================== Table ===================== */
 .el-table th.el-table__cell {
   background-color: var(--table-header-bg) !important;
   color: var(--text-regular) !important;
   font-weight: var(--font-weight-medium) !important;
-  font-size: var(--font-size-sm) !important;
   border-bottom: 1px solid var(--table-border) !important;
 }
 
@@ -60,12 +54,7 @@ h2 {
   background-color: var(--table-hover) !important;
 }
 
-.el-table td.el-table__cell,
-.el-table th.el-table__cell {
-  font-size: var(--font-size-sm);
-}
-
-/* ===================== Card — 极简风格 ===================== */
+/* ===================== Card ===================== */
 .el-card {
   border: 1px solid var(--border-light);
   box-shadow: none;
@@ -75,7 +64,6 @@ h2 {
 .el-card__header {
   border-bottom: 1px solid var(--border-light);
   padding: var(--spacing-md) var(--card-padding);
-  font-size: var(--font-size-base);
   font-weight: var(--font-weight-medium);
 }
 
@@ -90,7 +78,7 @@ h2 {
 
 /* ===================== Buttons ===================== */
 .el-button {
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-base);
   border-radius: var(--radius-md);
 }
 
@@ -110,23 +98,24 @@ h2 {
   background-color: var(--bg-filter);
 }
 
-/* ===================== Breadcrumb ===================== */
-.el-breadcrumb {
-  font-size: var(--font-size-sm);
+/* ===================== Form Inputs ===================== */
+.el-form-item__label {
+  font-size: var(--font-size-base);
+  color: var(--text-regular);
 }
 
-.el-breadcrumb__inner.is-link {
-  color: var(--text-secondary);
+.el-input__wrapper {
+  box-shadow: 0 0 0 1px var(--border-input) inset;
 }
 
-.el-breadcrumb__inner.is-link:hover {
-  color: var(--color-primary);
+.el-input__wrapper:hover {
+  box-shadow: 0 0 0 1px var(--color-primary) inset;
 }
 
 /* ===================== Dialog ===================== */
 .el-dialog {
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-dialog);
 }
 
 .el-dialog__header {
@@ -140,50 +129,32 @@ h2 {
   padding-top: var(--spacing-md);
 }
 
+/* ===================== Breadcrumb ===================== */
+.el-breadcrumb {
+  font-size: var(--font-size-sm);
+}
+
+.el-breadcrumb__inner.is-link {
+  color: var(--text-secondary);
+}
+
+.el-breadcrumb__inner.is-link:hover {
+  color: var(--color-primary);
+}
+
 /* ===================== Pagination ===================== */
-.el-pagination {
-  font-size: var(--font-size-sm);
-}
-
-.el-pagination .el-pager li.is-active {
+.el-pager li.is-active {
   background-color: var(--color-primary);
-  color: #fff;
+  color: var(--text-inverse);
 }
 
-.el-pagination .el-pager li:hover {
+.el-pager li:hover {
   color: var(--color-primary);
 }
 
-/* ===================== Form ===================== */
-.el-form-item__label {
-  font-size: var(--font-size-sm);
-  color: var(--text-regular);
-}
-
-.el-input__inner {
-  font-size: var(--font-size-sm);
-}
-
-.el-input__wrapper {
-  box-shadow: 0 0 0 1px var(--border-input) inset;
-}
-
-.el-input__wrapper:hover {
-  box-shadow: 0 0 0 1px var(--color-primary) inset;
-}
-
-/* ===================== DatePicker ===================== */
-.el-date-table td.current:not(.disabled) .el-date-table-cell__text {
-  background-color: var(--color-primary) !important;
-}
-
-.el-date-table td.today .el-date-table-cell__text {
-  color: var(--color-primary);
-}
-
-/* ===================== Tag ===================== */
+/* ===================== Tags ===================== */
 .el-tag {
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   font-size: var(--font-size-xs);
 }
 
@@ -191,6 +162,31 @@ h2 {
 .el-dropdown-menu__item:hover {
   color: var(--color-primary) !important;
   background-color: var(--bg-filter) !important;
+}
+
+/* ===================== Tabs ===================== */
+.el-tabs__active-bar {
+  background-color: var(--color-primary);
+}
+
+.el-tabs__item.is-active,
+.el-tabs__item:hover {
+  color: var(--color-primary);
+}
+
+/* ===================== Steps ===================== */
+.el-step__title.is-process {
+  color: var(--color-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.el-step__head.is-process {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.el-step__title.is-wait {
+  color: var(--text-secondary);
 }
 
 /* ===================== Scrollbar ===================== */
@@ -212,7 +208,7 @@ h2 {
   background: var(--bg-scrollbar);
 }
 
-/* ===================== Checkbox & Select ===================== */
+/* ===================== Checkbox ===================== */
 .el-checkbox__input.is-checked .el-checkbox__inner {
   background-color: var(--color-primary);
   border-color: var(--color-primary);
@@ -223,54 +219,19 @@ h2 {
   border-color: var(--color-primary);
 }
 
+/* ===================== Select ===================== */
 .el-select-dropdown__item.selected,
 .el-select-dropdown__item:hover {
   color: var(--color-primary);
 }
 
-/* ===================== Tabs ===================== */
-.el-tabs__active-bar {
-  background-color: var(--color-primary);
-}
-
-.el-tabs__item.is-active,
-.el-tabs__item:hover {
+/* ===================== Link ===================== */
+.el-link.el-link--primary {
   color: var(--color-primary);
 }
 
-/* ===================== Progress ===================== */
-.el-progress-bar__inner {
-  background-color: var(--color-primary);
-}
-
-/* ===================== Step Wizard ===================== */
-.el-step__title.is-process {
-  color: var(--color-primary);
-  font-weight: var(--font-weight-medium);
-}
-
-.el-step__head.is-process {
-  color: var(--color-primary);
-  border-color: var(--color-primary);
-}
-
-.el-step__title.is-wait {
-  color: var(--text-secondary);
-}
-
-/* ===================== Empty State ===================== */
-.el-empty__description p {
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-}
-
-/* ===================== Message Box ===================== */
-.el-message-box {
-  border-radius: var(--radius-md);
-}
-
-.el-message-box__headerbtn:hover .el-message-box__close {
-  color: var(--color-primary);
+.el-link.el-link--primary:hover {
+  color: var(--color-primary-light);
 }
 
 /* ===================== Popover ===================== */
@@ -281,12 +242,16 @@ h2 {
   font-size: var(--font-size-sm);
 }
 
-/* ===================== Link ===================== */
-.el-link.el-link--primary {
-  font-size: var(--font-size-sm);
-}
-
 /* ===================== Tooltip ===================== */
 .el-tooltip__trigger:focus-visible {
   outline-color: var(--color-primary);
+}
+
+/* ===================== DatePicker ===================== */
+.el-date-table td.current:not(.disabled) .el-date-table-cell__text {
+  background-color: var(--color-primary) !important;
+}
+
+.el-date-table td.today .el-date-table-cell__text {
+  color: var(--color-primary);
 }

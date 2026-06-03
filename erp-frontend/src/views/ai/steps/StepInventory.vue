@@ -2,7 +2,7 @@
   <div class="step-inventory">
     <!-- Section 1: Heatmap -->
     <el-collapse v-model="activeSections" class="inventory-collapse">
-      <el-collapse-item title="📊 库存热力图" name="heatmap">
+      <el-collapse-item title="库存热力图" name="heatmap">
         <div v-loading="heatmapLoading" class="chart-area">
           <v-chart
             v-if="!heatmapLoading && hasData"
@@ -18,9 +18,9 @@
     <!-- Section 2: AI Recommendation -->
     <div class="ai-section">
       <div class="section-row">
-        <span class="section-title">💬 AI 智能推荐分析</span>
+        <span class="section-title">AI 智能推荐分析</span>
         <el-button type="warning" size="small" @click="onRecommend" :loading="aiLoading">
-          🤖 智能推荐
+          智能推荐
         </el-button>
       </div>
       <div class="ai-content">
@@ -40,7 +40,7 @@
     <!-- Section 3: 补货清单 -->
     <div class="table-section">
       <div class="table-header">
-        <span class="section-title">📋 补货清单</span>
+        <span class="section-title">补货清单</span>
         <div class="header-right">
           <span class="section-count">共 {{ store.allProducts.length }} 项</span>
           <el-button type="primary" size="default" @click="openAddDialog">+ 添加产品</el-button>

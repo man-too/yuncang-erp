@@ -3,8 +3,8 @@
     <!-- 侧边栏 — 领星深色风格 #0b1019 -->
     <el-aside :width="isCollapse ? '64px' : '220px'" class="app-sidebar">
       <div class="sidebar-logo" @click="router.push('/dashboard')">
-        <span v-show="!isCollapse" class="sidebar-logo-text">📦 供应链ERP</span>
-        <span v-show="isCollapse" class="sidebar-logo-icon">📦</span>
+        <span v-show="!isCollapse" class="sidebar-logo-text">供应链ERP</span>
+        <span v-show="isCollapse" class="sidebar-logo-icon">ERP</span>
       </div>
       <el-menu
         :default-active="route.path"

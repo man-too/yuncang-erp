@@ -2,7 +2,7 @@
   <div class="step-summary">
     <!-- 顶部：确认标题 -->
     <div class="summary-hero">
-      <div class="hero-icon">✅</div>
+      <div class="hero-icon"><el-icon color="var(--color-success)"><CircleCheck /></el-icon></div>
       <div class="hero-text">
         <h3>采购计划确认</h3>
         <p>请核对以下采购计划，确认后生成采购订单</p>
@@ -75,7 +75,7 @@
       <div class="footer-actions">
         <el-button size="large" @click="store.prevStep()">◀ 返回修改</el-button>
         <el-button size="large" type="primary" @click="onConfirm" :loading="submitting" :disabled="orderItems.length === 0">
-          ✅ 确认生成采购订单
+          确认生成采购订单
         </el-button>
       </div>
     </div>
@@ -85,6 +85,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
+import { CircleCheck } from '@element-plus/icons-vue'
 import { usePurchaseDecisionStore } from '@/stores/purchaseDecision'
 import { purchaseApi } from '@/api'
 

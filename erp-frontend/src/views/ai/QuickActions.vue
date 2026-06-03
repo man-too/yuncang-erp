@@ -13,7 +13,7 @@
         v-for="action in quickActions" :key="action.label"
         class="action-cell" @click="$emit('quickAction', { type: action.type, prompt: action.prompt })"
       >
-        <span class="cell-icon">{{ action.icon }}</span>
+        <el-icon class="cell-icon"><component :is="action.icon" /></el-icon>
         <span class="cell-label">{{ action.label }}</span>
         <span class="cell-desc">{{ action.description }}</span>
       </div>
@@ -23,23 +23,24 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { WarningFilled, TrendCharts, Trophy, Search, ShoppingCartFull, Refresh } from '@element-plus/icons-vue'
 
 defineEmits<{ quickAction: [payload: { type: string; prompt: string }] }>()
 
 const isCollapsed = ref(true)
 
 const quickActions = [
-  { icon: '🔴', label: '库存预警', type: 'stock_alert', description: '分析库存风险，定位紧缺产品',
+  { icon: WarningFilled, label: '库存预警', type: 'stock_alert', description: '分析库存风险，定位紧缺产品',
     prompt: '请用热力图展示库存风险分布，用表格列出需要紧急补货的产品，按风险等级排序。' },
-  { icon: '📈', label: '销售预测', type: 'sales_forecast', description: '预测未来30天销量趋势',
+  { icon: TrendCharts, label: '销售预测', type: 'sales_forecast', description: '预测未来30天销量趋势',
     prompt: '请分析销售趋势数据，给出备货建议和销售洞察。' },
-  { icon: '🏆', label: '供应商排名', type: 'supplier_ranking', description: '多维度评估供应商表现',
+  { icon: Trophy, label: '供应商排名', type: 'supplier_ranking', description: '多维度评估供应商表现',
     prompt: '请用柱状图展示各供应商评分对比，用表格列出综合排名，从质量、交付、价格、服务四个维度分析。' },
-  { icon: '🔍', label: '综合诊断', type: 'dashboard', description: '全链路供应链健康检查',
+  { icon: Search, label: '综合诊断', type: 'dashboard', description: '全链路供应链健康检查',
     prompt: '请对当前供应链状况进行综合诊断，包括库存健康度、销售趋势、供应商表现，并给出改进建议。' },
-  { icon: '🛒', label: '采购建议', type: 'purchase_advice', description: '智能生成采购补货方案',
+  { icon: ShoppingCartFull, label: '采购建议', type: 'purchase_advice', description: '智能生成采购补货方案',
     prompt: '根据当前低库存产品和销售趋势，推荐需要采购的产品清单及建议采购量，并推荐最佳供应商。' },
-  { icon: '🔄', label: '调拨建议', type: 'transfer_advice', description: '优化仓库间库存配置',
+  { icon: Refresh, label: '调拨建议', type: 'transfer_advice', description: '优化仓库间库存配置',
     prompt: '分析各仓库的库存分布，识别库存分布不均衡的产品，给出调拨建议。' },
 ]
 </script>

@@ -13,7 +13,7 @@
     <!-- 采购决策 -->
     <div style="margin-bottom: 12px;">
       <el-button type="primary" size="small" @click="purchaseStore.isExpanded = !purchaseStore.isExpanded">
-        🚀 采购决策生成
+        采购决策生成
       </el-button>
     </div>
 
@@ -24,7 +24,7 @@
 
     <!-- 决策历史 -->
     <el-collapse v-model="historyOpen" style="margin-top: 12px;">
-      <el-collapse-item title="📋 AI 决策历史" name="history">
+      <el-collapse-item title="AI 决策历史" name="history">
         <el-table :data="historyList" stripe v-loading="historyLoading" max-height="300" size="small">
           <el-table-column prop="decision_type" label="类型" width="120">
             <template #default="{ row }">

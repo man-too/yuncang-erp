@@ -2,7 +2,7 @@
   <div class="login-container">
     <div class="login-card">
       <div class="login-brand">
-        <div class="login-brand-icon">📦</div>
+        <div class="login-brand-icon"><el-icon :size="36"><Box /></el-icon></div>
         <h1 class="login-brand-name">供应链ERP管理系统</h1>
       </div>
       <el-form ref="formRef" :model="form" :rules="rules" label-width="0" size="large">
@@ -31,6 +31,7 @@
 import { ref, shallowReactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Box } from '@element-plus/icons-vue'
 import { authApi } from '@/api'
 import type { FormInstance } from 'element-plus'
 
