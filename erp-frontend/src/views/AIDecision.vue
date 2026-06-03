@@ -19,9 +19,6 @@
 
     <PurchaseDecisionWizard v-if="purchaseStore.isExpanded" style="margin-bottom: 12px;" @close="purchaseStore.close()" />
 
-    <!-- AI 对话 -->
-    <DecisionChat />
-
     <!-- 决策历史 -->
     <el-collapse v-model="historyOpen" style="margin-top: 12px;">
       <el-collapse-item title="AI 决策历史" name="history">
@@ -48,7 +45,6 @@
 <script setup lang="ts">
 import { ref, onMounted, shallowReactive } from 'vue'
 import { aiApi } from '@/api'
-import DecisionChat from '@/views/ai/DecisionChat.vue'
 import PurchaseDecisionWizard from '@/views/ai/PurchaseDecisionWizard.vue'
 import { usePurchaseDecisionStore } from '@/stores/purchaseDecision'
 

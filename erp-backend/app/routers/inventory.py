@@ -266,6 +266,8 @@ def alert_heatmap(
             "min_stock": prod.min_stock,
             "max_stock": prod.max_stock,
             "alert_level": max(0.0, alert_level),
+            "unit": prod.unit,
+            "purchase_price": float(prod.purchase_price),
         })
 
     return items

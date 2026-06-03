@@ -9,6 +9,7 @@
             :option="chartOption"
             autoresize
             style="height: 340px;"
+            @click="onHeatmapClick"
           />
           <el-empty v-else-if="!heatmapLoading" description="暂无库存数据" :image-size="80" />
         </div>
@@ -186,7 +187,7 @@ const chartOption = computed(() => {
     },
     grid: { left: 160, right: 40, top: 50, bottom: 50 },
     xAxis: { type: 'category', data: whNames, splitArea: { show: true }, axisLabel: { fontSize: 11 } },
-    yAxis: { type: 'category', data: prodNames, splitArea: { show: true } },
+    yAxis: { type: 'category', data: prodNames, splitArea: { show: true }, axisLabel: { width: 140, overflow: 'truncate', fontSize: 11 } },
     visualMap: { min: 0, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#e8f5e9', '#fff9c4', '#ffcc80', '#ef5350'] } },
     series: [{ name: '库存状态', type: 'heatmap', data, label: { show: data.length < 50 }, emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.5)' } } }],
   }
@@ -196,6 +197,35 @@ async function loadHeatmap() {
   heatmapLoading.value = true
   try { heatmapData.value = (await inventoryApi.heatmap()) || [] }
   finally { heatmapLoading.value = false }
+}
+
+// -- Heatmap click → add to restock list --
+function onHeatmapClick(params: any) {
+  if (!params.data) return
+  const whName = warehouseNames.value[params.data[0]]
+  const prodName = productNames.value[params.data[1]]
+  const item = heatmapData.value.find(
+    (d: any) => d.warehouse_name === whName && d.product_name === prodName
+  )
+  if (!item) return
+  const exists = store.allProducts.find(p => p.product_id === item.product_id)
+  if (exists) {
+    ElMessage.warning(`${item.product_name} 已在补货清单中`)
+    return
+  }
+  store.addToProducts({
+    id: item.product_id,
+    name: item.product_name,
+    code: item.product_code || '',
+    warehouse_id: item.warehouse_id || 1,
+    warehouse_name: item.warehouse_name || '默认仓库',
+    current_qty: item.quantity || 0,
+    min_stock: item.min_stock || 0,
+    max_stock: item.max_stock || 0,
+    unit: item.unit || '个',
+    purchase_price: item.purchase_price || 0,
+  })
+  ElMessage.success(`${item.product_name} 已添加到补货清单`)
 }
 
 // -- Section 2: AI --

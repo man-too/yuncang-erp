@@ -23,6 +23,8 @@
   --color-warning-bg: rgba(200, 140, 52, 0.06);
   --color-warning-border: rgba(200, 140, 52, 0.15);
 
+  --color-accent: #C88C34;
+
   --color-danger: #C0393C;
   --color-danger-light: #D05E60;
   --color-danger-bg: rgba(192, 57, 60, 0.06);
