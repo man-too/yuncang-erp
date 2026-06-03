@@ -120,7 +120,8 @@ const logout = () => {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--color-primary);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
   flex-shrink: 0;
 }
 
