@@ -177,12 +177,12 @@ const logout = () => {
   display: flex;
   align-items: center;
   gap: var(--spacing-xs);
-  color: var(--text-regular);
+  color: var(--text-header-secondary);
   font-size: var(--font-size-sm);
 }
 
 .header-user:hover {
-  color: var(--color-primary);
+  color: var(--text-header);
 }
 
 /* ===================== Main ===================== */

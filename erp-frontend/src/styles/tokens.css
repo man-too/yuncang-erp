@@ -51,7 +51,10 @@
   --bg-sidebar-active: rgba(27, 58, 92, 0.25);
   --bg-selected: rgba(27, 58, 92, 0.06);
   --bg-active: rgba(27, 58, 92, 0.10);
-  --bg-header: #FFFFFF;
+  --bg-header: #1B3A5C;
+  --text-header: #FFFFFF;
+  --text-header-secondary: rgba(255, 255, 255, 0.7);
+  --header-border: rgba(255, 255, 255, 0.1);
   --bg-filter: #F2F4F6;
   --bg-input: #FFFFFF;
   --bg-disabled: #F2F4F6;

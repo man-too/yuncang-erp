@@ -63,10 +63,14 @@ h2 {
   font-size: var(--font-size-xs);
   padding: 4px 10px;
 }
-/* Edit button in row — theme color border on hover */
-.el-table .el-button--small.is-plain:hover {
-  border-color: var(--color-primary);
+/* Table operation buttons — text style, no borders */
+.el-table .el-button--small.is-text {
+  padding: 4px 8px;
+}
+/* Edit/delete button hover — theme color */
+.el-table .el-button--small.is-text:hover {
   color: var(--color-primary);
+  background-color: var(--color-primary-bg);
 }
 
 /* Selected/highlighted row in tables */
@@ -185,6 +189,37 @@ h2 {
 .el-dialog__footer {
   border-top: 1px solid var(--border-light);
   padding-top: var(--spacing-md);
+}
+
+/* ===================== Header — Dark Navy Theme ===================== */
+.el-header {
+  background-color: var(--bg-header) !important;
+  border-bottom: 1px solid var(--header-border) !important;
+}
+
+/* Breadcrumb in dark header */
+.el-header .el-breadcrumb__inner {
+  color: var(--text-header-secondary) !important;
+}
+.el-header .el-breadcrumb__inner.is-link:hover {
+  color: var(--text-header) !important;
+}
+
+/* User dropdown text in header */
+.el-header .header-user {
+  color: var(--text-header-secondary) !important;
+}
+.el-header .header-user:hover {
+  color: var(--text-header) !important;
+}
+
+/* Header collapse button should be light colored */
+.el-header .el-button.is-text {
+  color: var(--text-header-secondary) !important;
+}
+.el-header .el-button.is-text:hover {
+  color: var(--text-header) !important;
+  background-color: rgba(255, 255, 255, 0.1) !important;
 }
 
 /* ===================== Breadcrumb ===================== */
