@@ -394,7 +394,7 @@ onMounted(async () => {
 }
 .chart-area {
   min-height: 340px;
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--border-light);
   border-radius: 8px;
   padding: 12px;
   background: #fff;
@@ -405,10 +405,10 @@ onMounted(async () => {
 
 /* Section 2: AI */
 .ai-section {
-  border: 1px solid #e1f3d8;
+  border: 1px solid var(--color-success-light);
   border-radius: 8px;
   padding: 16px 20px;
-  background: #f6fdf3;
+  background: var(--color-success-bg);
 }
 .ai-content {
   margin-top: 12px;
@@ -418,7 +418,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 10px;
-  color: #909399;
+  color: var(--text-secondary);
   font-size: 13px;
 }
 .ai-loading .is-loading {
@@ -429,7 +429,7 @@ onMounted(async () => {
   to { transform: rotate(360deg); }
 }
 .ai-placeholder {
-  color: #909399;
+  color: var(--text-secondary);
   font-size: 13px;
   font-style: italic;
 }
@@ -475,10 +475,10 @@ onMounted(async () => {
 .section-title {
   font-weight: 600;
   font-size: 15px;
-  color: #303133;
+  color: var(--text-primary);
 }
 .section-count {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-secondary);
 }
 </style>

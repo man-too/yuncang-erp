@@ -8,7 +8,7 @@
       </div>
 
       <!-- 2. 中部筛选区 -->
-      <div class="filter-bar" style="background: #f5f7fa; padding: 16px; border-radius: 6px; margin-bottom: 16px;">
+      <div class="filter-bar">
         <el-row :gutter="16">
           <el-col :span="6">
             <el-input v-model="cFilters.keyword" placeholder="名称/编码模糊搜索" size="default" clearable />
@@ -75,7 +75,7 @@
       </div>
 
       <!-- 2. 中部筛选区 -->
-      <div class="filter-bar" style="background: #f5f7fa; padding: 16px; border-radius: 6px; margin-bottom: 16px;">
+      <div class="filter-bar">
         <el-row :gutter="16">
           <el-col :span="6">
             <el-input v-model="soFilters.keyword" placeholder="订单号搜索" size="default" clearable />

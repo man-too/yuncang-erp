@@ -108,14 +108,18 @@ onMounted(() => {
 .decision-chat {
   display: flex; flex-direction: column;
   height: calc(100vh - 180px); min-height: 600px;
-  border: 1px solid #e4e7ed; border-radius: 12px;
-  overflow: hidden; background: #fff;
+  border: 1px solid var(--border-color); border-radius: 12px;
+  overflow: hidden; background: var(--bg-card);
 }
 .chat-msgs {
-  flex: 1; overflow-y: auto; padding: 16px;
+  flex: 1; overflow-y: auto; padding: var(--spacing-lg);
   display: flex; flex-direction: column; gap: 14px;
 }
-.chat-input { padding: 12px 16px; border-top: 1px solid #ebeef5; background: #fafbfc; }
+.chat-input {
+  padding: 12px var(--spacing-lg);
+  border-top: 1px solid var(--border-light);
+  background: var(--bg-page);
+}
 .input-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 
 .typing-bubble { display: flex; gap: 10px; align-self: flex-start; }
@@ -123,15 +127,16 @@ onMounted(() => {
   width: 36px; height: 36px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-size: 13px; font-weight: 600; color: #fff;
-  background: linear-gradient(135deg, #667eea, #764ba2);
+  background: linear-gradient(135deg, #1E3A5F, #2A4F7F);
 }
 .typing-dots {
   display: flex; gap: 4px; align-items: center;
-  padding: 12px 16px; border-radius: 12px; background: #f5f7fa;
-  border: 1px solid #e4e7ed;
+  padding: 12px 16px; border-radius: 12px;
+  background: var(--bg-page);
+  border: 1px solid var(--border-color);
 }
 .typing-dots span {
-  width: 7px; height: 7px; border-radius: 50%; background: #909399;
+  width: 7px; height: 7px; border-radius: 50%; background: var(--text-secondary);
   animation: dot-bounce 1.4s infinite ease-in-out both;
 }
 .typing-dots span:nth-child(1) { animation-delay: -0.32s; }

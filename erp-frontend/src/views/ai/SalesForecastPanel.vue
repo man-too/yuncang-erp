@@ -102,7 +102,7 @@ const chartOption = computed(() => {
       dataZoom: [{ type: 'inside', start: 0, end: 100 }],
       series: [
         { name: '历史销量', type: 'line', smooth: true, data: [...historyValues, ...Array(dates.length).fill(null)],
-          showSymbol: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#5470c6', width: 2 } },
+          showSymbol: true, symbol: 'circle', symbolSize: 6, lineStyle: { color: '#1E3A5F', width: 2 } },
         { name: '预测销量', type: 'line', smooth: true, data: [...Array(historyValues.length).fill(null), ...values],
           showSymbol: true, symbol: 'diamond', symbolSize: 8, lineStyle: { color: '#fc8452', width: 2, type: 'dashed' },
           areaStyle: { color: 'rgba(252,132,82,0.1)' }, itemStyle: { color: '#fc8452' } },
@@ -121,7 +121,7 @@ const chartOption = computed(() => {
     dataZoom: [{ type: 'inside', start: 0, end: 100 }],
     series: [{
       name: '历史销量', type: 'line', smooth: true, data: values, showSymbol: true, symbol: 'circle', symbolSize: 7,
-      lineStyle: { color: '#5470c6', width: 2.5 }, areaStyle: { color: 'rgba(84,112,198,0.12)' },
+      lineStyle: { color: '#1E3A5F', width: 2.5 }, areaStyle: { color: 'rgba(30,58,95,0.12)' },
       emphasis: { scale: 1.8 },
     }],
   }
@@ -189,15 +189,15 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.filter-bar { background: #f5f7fa; padding: 10px 14px; border-radius: 8px; }
+.filter-bar { background: var(--bg-filter); padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-color); }
 .toggle-btn { display: flex; align-items: center; gap: 6px; padding: 8px 20px; border-radius: 8px; border: 2px solid #e0e0e0; background: #fff; cursor: pointer; transition: all 0.25s; user-select: none; }
 .toggle-btn:hover { border-color: #b0b0b0; background: #fafafa; }
-.toggle-btn.active { border-color: #5470c6; background: #f0f4ff; box-shadow: 0 0 0 3px rgba(84,112,198,0.12); }
+.toggle-btn.active { border-color: var(--color-primary); background: var(--color-info-bg); box-shadow: 0 0 0 3px rgba(30, 58, 95, 0.12); }
 .toggle-icon { font-size: 16px; }
 .toggle-label { font-size: 13px; font-weight: 600; color: #333; }
-.active .toggle-label { color: #5470c6; }
-.ai-bubble { display: flex; gap: 12px; padding: 14px; background: #f0f9ff; border-radius: 12px; border: 1px solid #bae6fd; }
-.ai-avatar { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 13px; flex-shrink: 0; }
+.active .toggle-label { color: var(--color-primary); }
+.ai-bubble { display: flex; gap: 12px; padding: 14px; background: var(--color-info-bg); border-radius: 12px; border: 1px solid var(--color-info-light); }
+.ai-avatar { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #1E3A5F, #2A4F7F); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 13px; flex-shrink: 0; }
 .ai-message { flex: 1; font-size: 14px; line-height: 1.6; }
 .ai-confidence { margin-top: 8px; font-size: 13px; color: #666; display: flex; align-items: center; }
 </style>

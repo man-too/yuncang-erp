@@ -1,0 +1,101 @@
+/* ========================================
+   ERP 专业商务风 — 设计 Token 体系
+   ======================================== */
+
+:root {
+  /* ===== Brand Colors ===== */
+  --color-primary: #1E3A5F;
+  --color-primary-light: #2A4F7F;
+  --color-primary-dark: #152840;
+  --color-accent: #C8983C;
+  --color-accent-light: #D4A855;
+
+  /* ===== Semantic Colors ===== */
+  --color-success: #2D8C4A;
+  --color-success-light: #E6F4EA;
+  --color-success-bg: #F0F9F4;
+  --color-warning: #D4840A;
+  --color-warning-light: #FFF3E0;
+  --color-warning-bg: #FFF8F0;
+  --color-danger: #C53030;
+  --color-danger-light: #FDE8E8;
+  --color-danger-bg: #FEF2F2;
+  --color-info: #4A7A9E;
+  --color-info-light: #E8F0F6;
+  --color-info-bg: #F2F6FA;
+
+  /* ===== Backgrounds ===== */
+  --bg-page: #F7F8FA;
+  --bg-card: #FFFFFF;
+  --bg-sidebar: #152238;
+  --bg-sidebar-hover: rgba(255, 255, 255, 0.08);
+  --bg-sidebar-active: rgba(255, 255, 255, 0.12);
+  --bg-header: #FFFFFF;
+  --bg-filter: #FFFFFF;
+  --bg-input: #FFFFFF;
+
+  /* ===== Text ===== */
+  --text-primary: #1A1A2E;
+  --text-regular: #5A5A7A;
+  --text-secondary: #8E8EA0;
+  --text-disabled: #B0B0C0;
+  --text-inverse: #FFFFFF;
+  --text-sidebar: #C8CDD5;
+  --text-sidebar-active: #FFFFFF;
+
+  /* ===== Borders ===== */
+  --border-color: #E2E4E9;
+  --border-light: #E8EAEF;
+  --border-lighter: #F0F1F5;
+
+  /* ===== Table ===== */
+  --table-stripe: #F9F9FB;
+  --table-hover: #F0F4FA;
+  --table-header-bg: #F7F8FA;
+  --table-border: #E2E4E9;
+
+  /* ===== Shadows ===== */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.10);
+  --shadow-header: 0 1px 4px rgba(0, 0, 0, 0.06);
+
+  /* ===== Radius ===== */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 50%;
+
+  /* ===== Spacing (8px grid) ===== */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+
+  /* ===== Typography ===== */
+  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;
+  --font-size-base: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 18px;
+  --font-size-2xl: 22px;
+  --font-size-3xl: 28px;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* ===== Transitions ===== */
+  --transition-fast: 0.15s ease;
+  --transition-base: 0.2s ease;
+  --transition-slow: 0.3s ease;
+
+  /* ===== Layout ===== */
+  --sidebar-width: 220px;
+  --sidebar-collapsed-width: 64px;
+  --header-height: 56px;
+  --card-padding: 20px;
+}

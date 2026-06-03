@@ -55,7 +55,7 @@ const currentStepComp = computed(() => {
   justify-content: space-between;
   align-items: center;
   padding-bottom: 4px;
-  border-bottom: 1px solid #ebeef5;
+  border-bottom: 1px solid var(--border-light);
 }
 .wizard-title {
   display: flex;
@@ -64,7 +64,7 @@ const currentStepComp = computed(() => {
 }
 .wizard-subtitle {
   font-size: 13px;
-  color: #909399;
+  color: var(--text-secondary);
 }
 .wizard-body {
   min-height: 420px;

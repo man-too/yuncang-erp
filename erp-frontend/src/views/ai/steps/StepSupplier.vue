@@ -48,7 +48,7 @@
             :value="p.product_id"
           >
             <span>{{ p.product_name }}</span>
-            <span style="float: right; color: #909399; font-size: 12px;">{{ p.warehouse_name }}</span>
+            <span style="float: right; color: var(--text-secondary); font-size: 12px;">{{ p.warehouse_name }}</span>
           </el-option>
         </el-select>
         <el-tag v-if="activeProductId && store.supplierChoices[activeProductId]" type="success" size="small" style="margin-left: 12px;">
@@ -207,7 +207,7 @@ const supplierChartOption = computed(() => {
       data: ratings.map((v: number) => ({
         value: v,
         itemStyle: {
-          color: v >= 4 ? '#67c23a' : v >= 3 ? '#e6a23c' : '#f56c6c',
+          color: v >= 4 ? '#2D8C4A' : v >= 3 ? '#D4840A' : '#C53030',
         },
       })),
       label: { show: true, position: 'top', formatter: '{c}' },
@@ -301,29 +301,29 @@ onMounted(async () => {
 .section-title {
   font-weight: 600;
   font-size: 15px;
-  color: #303133;
+  color: var(--text-primary);
 }
 .section-hint {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-secondary);
 }
 .section-count {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-secondary);
 }
 
 /* Section 1: AI */
 .ai-section {
-  border: 1px solid #e1f3d8;
+  border: 1px solid var(--color-success-light);
   border-radius: 8px;
   padding: 16px 20px;
-  background: #f6fdf3;
+  background: var(--color-success-bg);
 }
 .ai-loading {
   display: flex;
   align-items: center;
   gap: 10px;
-  color: #909399;
+  color: var(--text-secondary);
   font-size: 13px;
   padding: 12px 0;
 }
@@ -331,15 +331,15 @@ onMounted(async () => {
   display: flex;
   gap: 12px;
   padding: 14px;
-  background: #f0f9ff;
+  background: var(--color-info-bg);
   border-radius: 12px;
-  border: 1px solid #bae6fd;
+  border: 1px solid var(--color-info-light);
 }
 .ai-avatar {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #667eea, #764ba2);
+  background: linear-gradient(135deg, #1E3A5F, #2A4F7F);
   color: #fff;
   display: flex;
   align-items: center;
@@ -363,7 +363,7 @@ onMounted(async () => {
 
 /* Section 2: Selection */
 .selection-section {
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--border-light);
   border-radius: 8px;
   padding: 16px 20px;
   background: #fff;
@@ -386,7 +386,7 @@ onMounted(async () => {
 .chart-area {
   flex: 1;
   min-height: 280px;
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--border-light);
   border-radius: 8px;
   padding: 12px;
   background: #fff;
@@ -401,7 +401,7 @@ onMounted(async () => {
 
 /* Section 3: Summary */
 .summary-section {
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--border-light);
   border-radius: 8px;
   padding: 16px 20px;
   background: #fff;
@@ -418,7 +418,7 @@ onMounted(async () => {
   cursor: pointer;
 }
 .empty-hint {
-  color: #909399;
+  color: var(--text-secondary);
   font-size: 13px;
   font-style: italic;
 }

@@ -45,12 +45,12 @@ const quickActions = [
 </script>
 
 <style scoped>
-.quick-panel { border-top: 2px solid #e4e7ed; background: #fafbfc; transition: all 0.3s; }
+.quick-panel { border-top: 2px solid var(--border-color); background: var(--bg-page); transition: all 0.3s; }
 .toggle-bar {
   padding: 8px 16px; cursor: pointer; text-align: center;
-  color: #606266; font-size: 13px; user-select: none;
+  color: var(--text-regular); font-size: 13px; user-select: none;
 }
-.toggle-bar:hover { background: #f0f2f5; }
+.toggle-bar:hover { background: var(--bg-page); opacity: 0.8; }
 .toggle-label { display: inline-flex; align-items: center; gap: 6px; }
 
 .actions-grid {
@@ -59,14 +59,14 @@ const quickActions = [
 }
 .action-cell {
   display: flex; flex-direction: column; align-items: center;
-  padding: 12px 6px; border-radius: 10px; border: 1px solid #e4e7ed;
-  background: #fff; cursor: pointer; transition: all 0.2s;
+  padding: 12px 6px; border-radius: 10px; border: 1px solid var(--border-color);
+  background: var(--bg-card); cursor: pointer; transition: all 0.2s;
 }
 .action-cell:hover {
-  border-color: #409eff; box-shadow: 0 2px 12px rgba(64,158,255,0.15);
+  border-color: var(--color-accent); box-shadow: 0 2px 12px rgba(200, 152, 60, 0.15);
   transform: translateY(-2px);
 }
 .cell-icon { font-size: 22px; }
-.cell-label { font-weight: 600; font-size: 14px; color: #303133; margin-top: 4px; }
-.cell-desc { font-size: 12px; color: #909399; margin-top: 2px; }
+.cell-label { font-weight: 600; font-size: 14px; color: var(--text-primary); margin-top: 4px; }
+.cell-desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
 </style>

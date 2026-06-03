@@ -113,9 +113,9 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.filter-bar { background: #f5f7fa; padding: 10px 14px; border-radius: 8px; }
-.ai-bubble { display: flex; gap: 12px; padding: 14px; background: #f0f9ff; border-radius: 12px; border: 1px solid #bae6fd; }
-.ai-avatar { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 13px; flex-shrink: 0; }
+.filter-bar { background: var(--bg-filter); padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-color); }
+.ai-bubble { display: flex; gap: 12px; padding: 14px; background: var(--color-info-bg); border-radius: 12px; border: 1px solid var(--color-info-light); }
+.ai-avatar { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #1E3A5F, #2A4F7F); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 13px; flex-shrink: 0; }
 .ai-message { flex: 1; font-size: 14px; line-height: 1.6; }
 .ai-confidence { margin-top: 8px; font-size: 13px; color: #666; display: flex; align-items: center; }
 </style>

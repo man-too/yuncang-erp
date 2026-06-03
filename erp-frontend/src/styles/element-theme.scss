@@ -1,0 +1,242 @@
+/* ========================================
+   Element Plus 2.x 主题覆写 — 专业商务风
+   通过 @forward ... with 在 EP SCSS 编译前覆写变量
+   ======================================== */
+
+@forward 'element-plus/theme-chalk/src/common/var.scss' with (
+  /* ----- Brand Colors ----- */
+  $colors: (
+    'primary': (
+      'base': #1E3A5F,
+    ),
+    'success': (
+      'base': #2D8C4A,
+    ),
+    'warning': (
+      'base': #D4840A,
+    ),
+    'danger': (
+      'base': #C53030,
+    ),
+    'error': (
+      'base': #C53030,
+    ),
+    'info': (
+      'base': #4A7A9E,
+    ),
+  ),
+
+  /* ----- Text Colors ----- */
+  $text-color: (
+    'primary': #1A1A2E,
+    'regular': #5A5A7A,
+    'secondary': #8E8EA0,
+    'placeholder': #B0B0C0,
+    'disabled': #B0B0C0,
+  ),
+
+  /* ----- Border Colors ----- */
+  $border-color: (
+    'base': #E2E4E9,
+    'light': #E8EAEF,
+    'lighter': #F0F1F5,
+    'extra-light': #F5F6F8,
+    'dark': #C8CCD2,
+  ),
+
+  /* ----- Fill Colors ----- */
+  $fill-color: (
+    'blank': #FFFFFF,
+    'light': #F7F8FA,
+    'lighter': #FAFBFC,
+  ),
+
+  /* ----- Background Colors ----- */
+  $bg-color: (
+    'base': #F7F8FA,
+    'page': #F7F8FA,
+    'overlay': #FFFFFF,
+  ),
+
+  /* ----- Font Family ----- */
+  $font-family: (
+    '':
+      "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif",
+  ),
+
+  /* ----- Border Radius ----- */
+  $border-radius: (
+    'base': 4px,
+    'small': 4px,
+    'round': 8px,
+    'circle': 100%,
+  ),
+
+  /* ----- Box Shadow ----- */
+  $box-shadow: (
+    'light': 0 1px 3px rgba(0, 0, 0, 0.06),
+    'base': 0 4px 12px rgba(0, 0, 0, 0.08),
+    'dark': 0 8px 24px rgba(0, 0, 0, 0.10),
+    'lighter': 0 1px 1px rgba(0, 0, 0, 0.03),
+  ),
+
+  /* ----- Menu ----- */
+  $menu: (
+    'active-color': #FFFFFF,
+    'bg-color': #152238,
+    'text-color': #C8CDD5,
+    'hover-color': #FFFFFF,
+    'item-height': 48px,
+  ),
+
+  /* ----- Header ----- */
+  $header: (
+    'bg-color': #FFFFFF,
+    'text-color': #1A1A2E,
+    'height': 56px,
+    'padding': 0 20px,
+  ),
+
+  /* ----- Main ----- */
+  $main: (
+    'padding': 16px,
+  ),
+
+  /* ----- Button ----- */
+  $button: (
+    'font-weight': 500,
+  ),
+  $button-border-radius: (
+    'base': 4px,
+    'small': 4px,
+    'round': 8px,
+  ),
+  $button-padding-vertical: (
+    'default': 8px,
+    'small': 5px,
+  ),
+  $button-padding-horizontal: (
+    'default': 16px,
+    'small': 12px,
+  ),
+
+  /* ----- Input ----- */
+  $input: (
+    'border-radius': 4px,
+    'border-color': #E2E4E9,
+    'hover-border-color': #1E3A5F,
+    'focus-border-color': #1E3A5F,
+  ),
+
+  /* ----- Select ----- */
+  $select: (
+    'border-color-hover': #1E3A5F,
+    'input-focus-border-color': #1E3A5F,
+  ),
+
+  /* ----- Table ----- */
+  $table: (
+    'border-color': #E2E4E9,
+    'text-color': #1A1A2E,
+    'header-text-color': #5A5A7A,
+    'row-hover-bg-color': #F0F4FA,
+    'header-bg-color': #F7F8FA,
+  ),
+  $table-padding: (
+    'default': 8px,
+  ),
+  $table-cell-padding: (
+    'default': 8px 12px,
+  ),
+
+  /* ----- Tag ----- */
+  $tag: (
+    'border-radius': 4px,
+    'font-size': 12px,
+  ),
+
+  /* ----- Dialog ----- */
+  $dialog: (
+    'border-radius': 8px,
+    'padding-primary': 20px,
+  ),
+
+  /* ----- Card ----- */
+  $card: (
+    'border-radius': 6px,
+    'border-color': #E2E4E9,
+    'bg-color': #FFFFFF,
+  ),
+
+  /* ----- Pagination ----- */
+  $pagination: (
+    'button-bg-color': #FFFFFF,
+    'hover-color': #1E3A5F,
+  ),
+
+  /* ----- Slider ----- */
+  $slider: (
+    'main-bg-color': #1E3A5F,
+    'runway-bg-color': #E2E4E9,
+  ),
+
+  /* ----- Switch ----- */
+  $switch: (
+    'on-color': #2D8C4A,
+    'off-color': #B0B0C0,
+  ),
+
+  /* ----- Tabs ----- */
+  $tabs: (
+    'active-color': #1E3A5F,
+  ),
+
+  /* ----- Date Editor ----- */
+  $date-editor: (
+    'active-range-bg-color': #E8F0F6,
+  ),
+
+  /* ----- Radio ----- */
+  $radio: (
+    'input-bg-color': #FFFFFF,
+    'input-border': solid,
+    'input-border-color': #E2E4E9,
+    'input-border-color-hover': #1E3A5F,
+    'input-height': 14px,
+    'input-width': 14px,
+  ),
+  $radio-checked: (
+    'input-border-color': #1E3A5F,
+    'text-color': #1E3A5F,
+  ),
+
+  /* ----- Checkbox ----- */
+  $checkbox: (
+    'checked-bg-color': #1E3A5F,
+    'checked-input-border-color': #1E3A5F,
+    'input-border-color-hover': #1E3A5F,
+  ),
+
+  /* ----- Loading ----- */
+  $loading: (
+    'spinner-color': #1E3A5F,
+  ),
+
+  /* ----- Timeline ----- */
+  $timeline: (
+    'node-color': #1E3A5F,
+  ),
+
+  /* ----- Link ----- */
+  $link: (
+    'text-color': #1E3A5F,
+    'hover-text-color': #2A4F7F,
+  ),
+
+  /* ----- Popover / Popup / Popper ----- */
+  $popup: (
+    'modal-bg-color': rgba(0, 0, 0, 0.4),
+  ),
+);
+
+@use 'element-plus/theme-chalk/src/index.scss';

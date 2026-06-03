@@ -1,0 +1,274 @@
+/* ========================================
+   全局样式深覆盖 — Element Plus 组件级微调
+   ======================================== */
+
+/* ----- 全局字体 & 基础 ----- */
+html, body {
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  color: var(--text-regular);
+  background-color: var(--bg-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ----- 页面标题 ----- */
+h2 {
+  color: var(--text-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* ===================== Sidebar Menu ===================== */
+
+/* 侧边栏菜单项 — 激活时金色左边框 */
+.el-menu-item.is-active {
+  border-left: 3px solid var(--color-accent) !important;
+  background-color: var(--bg-sidebar-active) !important;
+}
+
+.el-menu-item:hover,
+.el-sub-menu__title:hover {
+  background-color: var(--bg-sidebar-hover) !important;
+}
+
+/* 折叠状态下边栏菜单 hover */
+.el-menu--collapse .el-menu-item:hover {
+  background-color: var(--bg-sidebar-hover) !important;
+}
+
+/* ===================== Table ===================== */
+
+/* 表头样式 */
+.el-table th.el-table__cell {
+  background-color: var(--table-header-bg) !important;
+  color: var(--text-primary) !important;
+  font-weight: var(--font-weight-semibold) !important;
+  font-size: var(--font-size-sm) !important;
+  border-bottom: 1px solid var(--table-border) !important;
+}
+
+/* 表格斑马纹 */
+.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
+  background-color: var(--table-stripe);
+}
+
+/* 表格 hover */
+.el-table__body tr:hover > td.el-table__cell {
+  background-color: var(--table-hover) !important;
+}
+
+/* 表格行边框 */
+.el-table td.el-table__cell {
+  border-bottom: 1px solid var(--border-lighter);
+}
+
+/* ===================== Card ===================== */
+
+/* 卡片阴影统一 */
+.el-card {
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+}
+
+.el-card.is-hover-shadow:hover,
+.el-card.is-always-shadow {
+  box-shadow: var(--shadow-md);
+}
+
+/* ===================== Filter Bar ===================== */
+
+/* 统一的筛选栏类名 */
+.filter-bar {
+  background: var(--bg-filter);
+  padding: var(--spacing-lg);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--spacing-lg);
+  border: 1px solid var(--border-color);
+}
+
+/* ===================== Button Refinements ===================== */
+
+.el-button--default {
+  border-color: var(--border-color);
+  color: var(--text-regular);
+}
+
+.el-button--default:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+/* 文字按钮 */
+.el-button.is-text:hover {
+  background-color: var(--bg-page);
+}
+
+/* ===================== Breadcrumb ===================== */
+
+.el-breadcrumb__inner.is-link {
+  color: var(--text-secondary);
+}
+
+.el-breadcrumb__inner.is-link:hover {
+  color: var(--color-primary);
+}
+
+/* ===================== Dialog ===================== */
+
+.el-dialog__header {
+  border-bottom: 1px solid var(--border-light);
+  padding-bottom: var(--spacing-lg);
+  margin-bottom: var(--spacing-lg);
+}
+
+.el-dialog__footer {
+  border-top: 1px solid var(--border-light);
+  padding-top: var(--spacing-lg);
+}
+
+/* ===================== Pagination ===================== */
+
+.el-pagination .el-pager li.is-active {
+  background-color: var(--color-primary);
+}
+
+.el-pagination .el-pager li:hover {
+  color: var(--color-primary);
+}
+
+/* ===================== Form ===================== */
+
+.el-input__wrapper {
+  box-shadow: 0 0 0 1px var(--border-color) inset;
+}
+
+.el-input__wrapper:hover {
+  box-shadow: 0 0 0 1px var(--color-primary) inset;
+}
+
+/* ===================== DatePicker ===================== */
+
+.el-date-table td.current:not(.disabled) .el-date-table-cell__text {
+  background-color: var(--color-primary) !important;
+}
+
+.el-date-table td.today .el-date-table-cell__text {
+  color: var(--color-primary);
+}
+
+/* ===================== Tag ===================== */
+
+.el-tag--primary {
+  --el-tag-bg-color: var(--color-info-bg);
+  --el-tag-border-color: var(--color-info-light);
+  --el-tag-text-color: var(--color-primary);
+}
+
+/* ===================== Dropdown ===================== */
+
+.el-dropdown-menu__item:hover {
+  color: var(--color-primary) !important;
+  background-color: var(--bg-page) !important;
+}
+
+/* ===================== Timeline (Dashboard) ===================== */
+
+.el-timeline-item__node--primary {
+  background-color: var(--color-primary);
+}
+
+/* ===================== Scrollbar ===================== */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-disabled);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ===================== Selection (Table Checkbox) ===================== */
+
+.el-checkbox__input.is-checked .el-checkbox__inner {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.el-checkbox__input.is-indeterminate .el-checkbox__inner {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+/* ===================== Select Dropdown ===================== */
+
+.el-select-dropdown__item.selected,
+.el-select-dropdown__item:hover {
+  color: var(--color-primary);
+}
+
+/* ===================== Tabs ===================== */
+
+.el-tabs__active-bar {
+  background-color: var(--color-primary);
+}
+
+.el-tabs__item.is-active,
+.el-tabs__item:hover {
+  color: var(--color-primary);
+}
+
+/* ===================== Tooltip ===================== */
+
+.el-tooltip__trigger:focus-visible {
+  outline-color: var(--color-primary);
+}
+
+/* ===================== Progress ===================== */
+
+.el-progress-bar__inner {
+  background-color: var(--color-primary);
+}
+
+/* ===================== Step Wizard ===================== */
+
+.el-step__title.is-process {
+  color: var(--color-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.el-step__head.is-process {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.el-step__title.is-wait {
+  color: var(--text-secondary);
+}
+
+/* ===================== Empty State ===================== */
+
+.el-empty__description p {
+  color: var(--text-secondary);
+}
+
+/* ===================== Link ===================== */
+
+.el-link.el-link--primary {
+  --el-link-text-color: var(--color-primary);
+}
+
+/* ===================== Message Box ===================== */
+
+.el-message-box__headerbtn:hover .el-message-box__close {
+  color: var(--color-primary);
+}

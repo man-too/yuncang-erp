@@ -66,10 +66,10 @@ const aiResult = ref<any>(null)
 const activeMetric = ref('total_score')
 
 const metrics = [
-  { key: 'quality_score', label: '质量评分', color: '#5470c6' },
-  { key: 'delivery_score', label: '交付评分', color: '#91cc75' },
-  { key: 'price_score', label: '价格评分', color: '#fac858' },
-  { key: 'service_score', label: '服务评分', color: '#ee6666' },
+  { key: 'quality_score', label: '质量评分', color: '#1E3A5F' },
+  { key: 'delivery_score', label: '交付评分', color: '#2D8C4A' },
+  { key: 'price_score', label: '价格评分', color: '#C8983C' },
+  { key: 'service_score', label: '服务评分', color: '#4A7A9E' },
   { key: 'total_score', label: '综合评分', color: '#73c0de' },
   { key: 'delivery_rate', label: '交付率', color: '#3ba272' },
   { key: 'receive_rate', label: '收货率', color: '#fc8452' },
@@ -92,7 +92,7 @@ const chartOption = computed(() => {
       type: 'bar', barMaxWidth: 40,
       data: chartData.value.map((d: any) => ({
         value: d[activeMetric.value] || 0,
-        itemStyle: { color: metric?.color || '#5470c6' },
+        itemStyle: { color: metric?.color || '#1E3A5F' },
       })),
       label: { show: true, position: 'top', formatter: (p: any) => activeMetric.value.includes('rate') ? p.value + '%' : p.value },
     }],
@@ -119,9 +119,9 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.filter-bar { background: #f5f7fa; padding: 10px 14px; border-radius: 8px; }
-.ai-bubble { display: flex; gap: 12px; padding: 14px; background: #f0f9ff; border-radius: 12px; border: 1px solid #bae6fd; }
-.ai-avatar { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 13px; flex-shrink: 0; }
+.filter-bar { background: var(--bg-filter); padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-color); }
+.ai-bubble { display: flex; gap: 12px; padding: 14px; background: var(--color-info-bg); border-radius: 12px; border: 1px solid var(--color-info-light); }
+.ai-avatar { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #1E3A5F, #2A4F7F); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 13px; flex-shrink: 0; }
 .ai-message { flex: 1; font-size: 14px; line-height: 1.6; }
 .ai-confidence { margin-top: 8px; font-size: 13px; color: #666; display: flex; align-items: center; }
 </style>

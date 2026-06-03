@@ -236,7 +236,7 @@ const chartOption = computed(() => {
         showSymbol: true,
         symbol: 'circle',
         symbolSize: 6,
-        lineStyle: { color: '#5470c6', width: 2 },
+        lineStyle: { color: '#1E3A5F', width: 2 },
       },
       {
         name: '预测销量',
@@ -376,25 +376,25 @@ onMounted(() => {
 .section-title {
   font-weight: 600;
   font-size: 15px;
-  color: #303133;
+  color: var(--text-primary);
 }
 .section-count {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-secondary);
 }
 
 /* Upper: AI Section */
 .ai-section {
-  border: 1px solid #bae6fd;
+  border: 1px solid var(--color-info-light);
   border-radius: 8px;
   padding: 16px 20px;
-  background: #f0f9ff;
+  background: var(--color-info-bg);
 }
 .ai-loading {
   display: flex;
   align-items: center;
   gap: 10px;
-  color: #909399;
+  color: var(--text-secondary);
   font-size: 13px;
   margin-top: 12px;
 }
@@ -407,7 +407,7 @@ onMounted(() => {
 }
 .ai-placeholder {
   margin-top: 12px;
-  color: #909399;
+  color: var(--text-secondary);
   font-size: 13px;
   font-style: italic;
 }
@@ -424,7 +424,7 @@ onMounted(() => {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #667eea, #764ba2);
+  background: linear-gradient(135deg, #1E3A5F, #2A4F7F);
   color: #fff;
   display: flex;
   align-items: center;
@@ -454,7 +454,7 @@ onMounted(() => {
 }
 .chart-area {
   min-height: 340px;
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--border-light);
   border-radius: 8px;
   padding: 12px;
   background: #fff;
@@ -467,14 +467,14 @@ onMounted(() => {
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  background: #f5f7fa;
+  background: var(--bg-page);
   border-radius: 8px;
   flex-wrap: wrap;
 }
 .qty-label {
   font-size: 13px;
   font-weight: 500;
-  color: #303133;
+  color: var(--text-primary);
 }
 .qty-unit {
   font-size: 13px;
@@ -482,7 +482,7 @@ onMounted(() => {
 }
 .qty-hint {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-secondary);
 }
 
 /* Lower: Table Section */

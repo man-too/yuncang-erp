@@ -1,7 +1,11 @@
 <template>
   <div class="login-container">
     <div class="login-card">
-      <h2 style="text-align: center; margin-bottom: 24px;">供应链ERP管理系统</h2>
+      <div class="login-brand">
+        <div class="login-brand-icon">📦</div>
+        <h1 class="login-brand-name">供应链ERP</h1>
+      </div>
+      <h2 class="login-title">{{ isRegister ? '创建账号' : '登录系统' }}</h2>
       <el-form ref="formRef" :model="form" :rules="rules" label-width="0" size="large">
         <el-form-item prop="username">
           <el-input v-model="form.username" placeholder="用户名" prefix-icon="User" />
@@ -10,13 +14,13 @@
           <el-input v-model="form.password" type="password" placeholder="密码" prefix-icon="Lock" show-password />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" :loading="loading" style="width: 100%" @click="handleLogin">
-            {{ isRegister ? '注册' : '登录' }}
+          <el-button type="primary" :loading="loading" class="login-submit" @click="handleLogin">
+            {{ isRegister ? '注册' : '登 录' }}
           </el-button>
         </el-form-item>
       </el-form>
-      <div style="text-align: center;">
-        <el-link type="primary" @click="toggleMode">
+      <div class="login-footer">
+        <el-link type="primary" :underline="false" @click="toggleMode">
           {{ isRegister ? '已有账号？去登录' : '没有账号？去注册' }}
         </el-link>
       </div>
@@ -81,18 +85,80 @@ const handleLogin = async () => {
 </script>
 
 <style scoped>
+/* ===================== Container ===================== */
 .login-container {
   height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background-color: var(--bg-sidebar);
+  background-image:
+    radial-gradient(circle at 15% 30%, rgba(255, 255, 255, 0.03) 0%, transparent 50%),
+    radial-gradient(circle at 85% 70%, rgba(200, 152, 60, 0.06) 0%, transparent 50%),
+    radial-gradient(circle at 50% 50%, rgba(30, 58, 95, 0.4) 0%, transparent 70%);
 }
+
+/* ===================== Card ===================== */
 .login-card {
   width: 420px;
-  padding: 40px;
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  padding: 44px 40px 36px;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border-light);
+}
+
+/* ===================== Brand Section ===================== */
+.login-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 28px;
+}
+
+.login-brand-icon {
+  font-size: 40px;
+  line-height: 1;
+  margin-bottom: var(--spacing-sm);
+}
+
+.login-brand-name {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+  margin: 0;
+  letter-spacing: 1px;
+}
+
+/* ===================== Title ===================== */
+.login-title {
+  text-align: center;
+  margin-bottom: 28px;
+  color: var(--text-regular);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-medium);
+  position: relative;
+}
+
+.login-title::after {
+  content: '';
+  display: block;
+  width: 36px;
+  height: 3px;
+  background: var(--color-accent);
+  margin: 10px auto 0;
+  border-radius: 2px;
+}
+
+/* ===================== Submit Button ===================== */
+.login-submit {
+  width: 100%;
+  margin-top: var(--spacing-sm);
+}
+
+/* ===================== Footer ===================== */
+.login-footer {
+  text-align: center;
+  margin-top: var(--spacing-sm);
 }
 </style>

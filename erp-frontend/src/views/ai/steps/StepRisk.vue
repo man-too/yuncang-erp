@@ -327,7 +327,7 @@ onMounted(() => {
 
 .group-count {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-secondary);
 }
 
 .group-cards {
@@ -337,7 +337,7 @@ onMounted(() => {
 }
 
 .risk-card {
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--border-light);
   border-radius: 8px;
 }
 
@@ -359,12 +359,12 @@ onMounted(() => {
 .product-name {
   font-weight: 600;
   font-size: 14px;
-  color: #303133;
+  color: var(--text-primary);
 }
 
 .product-code {
   font-size: 12px;
-  color: #909399;
+  color: var(--text-secondary);
   margin-top: 2px;
 }
 
@@ -382,27 +382,27 @@ onMounted(() => {
 
 .info-label {
   font-size: 11px;
-  color: #909399;
+  color: var(--text-secondary);
 }
 
 .info-value {
   font-size: 13px;
   font-weight: 500;
-  color: #303133;
+  color: var(--text-primary);
 }
 
 .text-danger {
-  color: #f56c6c;
+  color: var(--color-danger);
   font-weight: 600;
 }
 
 .text-warning {
-  color: #e6a23c;
+  color: var(--color-warning);
   font-weight: 600;
 }
 
 .text-success {
-  color: #67c23a;
+  color: var(--color-success);
 }
 
 .card-right {
@@ -415,13 +415,13 @@ onMounted(() => {
 
 .score {
   font-size: 11px;
-  color: #909399;
+  color: var(--text-secondary);
 }
 
 .card-reason {
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px dashed #ebeef5;
+  border-top: 1px dashed var(--border-light);
   font-size: 12px;
   color: #606266;
   line-height: 1.6;
@@ -433,6 +433,6 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding-top: 12px;
-  border-top: 1px solid #ebeef5;
+  border-top: 1px solid var(--border-light);
 }
 </style>

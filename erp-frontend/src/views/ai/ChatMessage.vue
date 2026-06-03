@@ -53,7 +53,7 @@
                 <div class="action-card">
                   <div class="action-text">
                     <strong>{{ action.label }}</strong>
-                    <p v-if="action.confirmDetail" style="margin:4px 0 0;font-size:13px;color:#909399;">
+                    <p v-if="action.confirmDetail" style="margin:4px 0 0;font-size:13px;color: var(--text-secondary);">
                       {{ action.confirmDetail }}
                     </p>
                   </div>
@@ -73,7 +73,7 @@
 
               <!-- success -->
               <div v-else-if="action.status === 'success'" class="action-status success">
-                <el-icon color="#67c23a"><CircleCheck /></el-icon>
+                <el-icon color="var(--color-success)"><CircleCheck /></el-icon>
                 <span>{{ action.resultMessage }}</span>
                 <el-button
                   v-if="action.resultLink" size="small" type="primary" link
@@ -83,7 +83,7 @@
 
               <!-- error -->
               <div v-else-if="action.status === 'error'" class="action-status error">
-                <el-icon color="#f56c6c"><CircleClose /></el-icon>
+                <el-icon color="var(--color-danger)"><CircleClose /></el-icon>
                 <span>{{ action.resultMessage }}</span>
                 <el-button size="small" type="warning" @click="$emit('retry', messageId, bi, ai)">重试</el-button>
               </div>
@@ -237,46 +237,46 @@ function hasValidChartData(block: MessageBlock): boolean {
   align-items: center; justify-content: center; font-size: 13px; font-weight: 600;
   flex-shrink: 0; color: #fff;
 }
-.chat-message.user .msg-avatar { background: linear-gradient(135deg, #409eff, #337ecc); }
-.chat-message.assistant .msg-avatar { background: linear-gradient(135deg, #667eea, #764ba2); }
+.chat-message.user .msg-avatar { background: linear-gradient(135deg, #1E3A5F, #2A4F7F); }
+.chat-message.assistant .msg-avatar { background: linear-gradient(135deg, #4A7A9E, #1E3A5F); }
 
 .msg-body { flex: 1; min-width: 0; }
 .msg-bubble {
   padding: 12px 16px; border-radius: 12px; font-size: 14px; line-height: 1.7;
 }
-.chat-message.user .msg-bubble { background: #ecf5ff; border: 1px solid #d9ecff; }
-.chat-message.assistant .msg-bubble { background: #f5f7fa; border: 1px solid #e4e7ed; }
+.chat-message.user .msg-bubble { background: var(--color-info-bg); border: 1px solid var(--color-info-light); }
+.chat-message.assistant .msg-bubble { background: var(--bg-page); border: 1px solid var(--border-color); }
 
 .msg-content h4 { margin: 12px 0 6px; font-size: 15px; }
 .msg-content li { margin-left: 16px; }
 
-.chart-container { margin: 12px 0; background: #fff; border-radius: 8px; padding: 8px; }
+.chart-container { margin: 12px 0; background: var(--bg-card); border-radius: 8px; padding: 8px; }
 .block-table {
   margin: 12px 0;
   border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  box-shadow: var(--shadow-sm);
 }
 .block-table :deep(th) {
-  background: #f5f7fa !important;
+  background: var(--table-header-bg) !important;
   font-weight: 600;
-  color: #303133;
+  color: var(--text-primary);
 }
 .block-table :deep(.el-table__row.enhanced-row:hover) {
-  background-color: #f0f5ff !important;
+  background-color: var(--table-hover) !important;
 }
 .block-table :deep(.enhanced-row) {
   transition: background-color 0.15s;
 }
-:deep(.cell-money) { color: #f56c6c; font-weight: 600; }
+:deep(.cell-money) { color: var(--color-danger); font-weight: 600; }
 :deep(.cell-number) { text-align: right; display: block; }
 
 .block-actions { margin: 12px 0; }
 .action-row { margin-bottom: 8px; }
 .action-card {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 12px 14px; border-radius: 10px; background: #fff;
-  border: 1px solid #409eff; border-left: 4px solid #409eff;
+  padding: 12px 14px; border-radius: 10px; background: var(--bg-card);
+  border: 1px solid var(--color-primary); border-left: 4px solid var(--color-accent);
 }
 .action-btns { display: flex; gap: 8px; flex-shrink: 0; }
 
@@ -284,8 +284,8 @@ function hasValidChartData(block: MessageBlock): boolean {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 8px 14px; border-radius: 8px; font-size: 13px;
 }
-.action-status.success { background: #f0f9eb; border: 1px solid #e1f3d8; color: #67c23a; }
-.action-status.error { background: #fef0f0; border: 1px solid #fde2e2; color: #f56c6c; }
+.action-status.success { background: var(--color-success-bg); border: 1px solid var(--color-success-light); color: var(--color-success); }
+.action-status.error { background: var(--color-danger-bg); border: 1px solid var(--color-danger-light); color: var(--color-danger); }
 .is-loading { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 </style>

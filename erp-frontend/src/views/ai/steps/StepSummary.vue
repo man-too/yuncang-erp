@@ -166,7 +166,7 @@ async function onConfirm() {
   align-items: center;
   gap: 16px;
   padding: 20px 24px;
-  background: linear-gradient(135deg, #f0f9ff, #e8f4fd);
+  background: linear-gradient(135deg, var(--color-info-bg), #E8F0F6);
   border-radius: 12px;
   border: 1px solid #d0e8f7;
 }
@@ -178,12 +178,12 @@ async function onConfirm() {
   margin: 0 0 4px;
   font-size: 18px;
   font-weight: 700;
-  color: #303133;
+  color: var(--text-primary);
 }
 .hero-text p {
   margin: 0;
   font-size: 14px;
-  color: #909399;
+  color: var(--text-secondary);
 }
 
 /* 统计卡片 */
@@ -194,7 +194,7 @@ async function onConfirm() {
   text-align: center;
   padding: 16px 8px;
   background: #fff;
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--border-light);
   border-radius: 10px;
   transition: box-shadow 0.2s;
 }
@@ -202,21 +202,21 @@ async function onConfirm() {
   box-shadow: 0 2px 12px rgba(0,0,0,0.08);
 }
 .stat-card.highlight {
-  background: #fef0f0;
-  border-color: #fde2e2;
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-light);
 }
 .stat-value {
   font-size: 26px;
   font-weight: 700;
-  color: #303133;
+  color: var(--text-primary);
   line-height: 1.3;
 }
 .stat-value.price {
-  color: #f56c6c;
+  color: var(--color-danger);
 }
 .stat-label {
   font-size: 13px;
-  color: #909399;
+  color: var(--text-secondary);
   margin-top: 2px;
 }
 
@@ -230,11 +230,11 @@ async function onConfirm() {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: #303133;
+  color: var(--text-primary);
 }
 .order-table :deep(.amount-cell) {
   font-weight: 600;
-  color: #f56c6c;
+  color: var(--color-danger);
 }
 
 /* 底部 */
@@ -243,9 +243,9 @@ async function onConfirm() {
   justify-content: space-between;
   align-items: flex-end;
   padding: 20px 24px;
-  background: #fafbfc;
+  background: var(--bg-page);
   border-radius: 12px;
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--border-light);
 }
 .footer-totals {
   display: flex;
@@ -266,17 +266,17 @@ async function onConfirm() {
 .total-num {
   font-size: 16px;
   font-weight: 600;
-  color: #303133;
+  color: var(--text-primary);
 }
 .total-row.emphasis .total-label {
   font-size: 16px;
   font-weight: 600;
-  color: #303133;
+  color: var(--text-primary);
 }
 .total-row.emphasis .total-num {
   font-size: 22px;
   font-weight: 700;
-  color: #f56c6c;
+  color: var(--color-danger);
 }
 .footer-actions {
   display: flex;
