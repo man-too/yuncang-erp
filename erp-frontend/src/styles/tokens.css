@@ -49,6 +49,8 @@
   --bg-sidebar: #121826;
   --bg-sidebar-hover: rgba(255, 255, 255, 0.06);
   --bg-sidebar-active: rgba(27, 58, 92, 0.25);
+  --bg-selected: rgba(27, 58, 92, 0.06);
+  --bg-active: rgba(27, 58, 92, 0.10);
   --bg-header: #FFFFFF;
   --bg-filter: #F2F4F6;
   --bg-input: #FFFFFF;

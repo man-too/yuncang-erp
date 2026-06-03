@@ -57,10 +57,10 @@ import { ref, onMounted } from 'vue'
 import { supplierApi, productApi, purchaseApi, aiApi } from '@/api'
 
 const statCards = ref([
-  { title: '供应商数量', value: 0, icon: 'Truck', color: '#005BF5' },
-  { title: '产品数量', value: 0, icon: 'Box', color: '#00941E' },
-  { title: '采购订单', value: 0, icon: 'ShoppingCart', color: '#F27A00' },
-  { title: 'AI 建议', value: 0, icon: 'MagicStick', color: '#E52E2E' },
+  { title: '供应商数量', value: 0, icon: 'Truck', color: '#1B3A5C' },
+  { title: '产品数量', value: 0, icon: 'Box', color: '#3B8C5C' },
+  { title: '采购订单', value: 0, icon: 'ShoppingCart', color: '#C88C34' },
+  { title: 'AI 建议', value: 0, icon: 'MagicStick', color: '#C0393C' },
 ])
 
 const aiHistory = ref<any[]>([])

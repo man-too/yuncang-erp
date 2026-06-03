@@ -38,6 +38,10 @@ h2 {
   background-color: var(--bg-sidebar-hover) !important;
 }
 
+.el-menu--collapse .el-menu-item.is-active {
+  background-color: var(--bg-sidebar-active) !important;
+}
+
 /* ===================== Table ===================== */
 .el-table th.el-table__cell {
   background-color: var(--table-header-bg) !important;
@@ -52,6 +56,22 @@ h2 {
 
 .el-table__body tr:hover > td.el-table__cell {
   background-color: var(--table-hover) !important;
+}
+
+/* Table operation column — small buttons get theme styling */
+.el-table .el-button--small {
+  font-size: var(--font-size-xs);
+  padding: 4px 10px;
+}
+/* Edit button in row — theme color border on hover */
+.el-table .el-button--small.is-plain:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+/* Selected/highlighted row in tables */
+.el-table__body tr.current-row > td.el-table__cell {
+  background-color: var(--bg-selected) !important;
 }
 
 /* ===================== Card ===================== */
@@ -94,8 +114,46 @@ h2 {
   background-color: var(--color-primary-bg);
 }
 
+/* Header collapse button uses theme color */
 .el-button.is-text:hover {
-  background-color: var(--bg-filter);
+  color: var(--color-primary) !important;
+  background-color: var(--color-primary-bg) !important;
+}
+
+/* Primary buttons — use theme color clearly */
+.el-button--primary {
+  --el-button-bg-color: var(--color-primary);
+  --el-button-border-color: var(--color-primary);
+}
+.el-button--primary:hover {
+  --el-button-bg-color: var(--color-primary-light);
+  --el-button-border-color: var(--color-primary-light);
+}
+.el-button--primary.is-plain {
+  --el-button-text-color: var(--color-primary);
+  --el-button-border-color: var(--color-primary);
+}
+
+/* Danger buttons — toned down muted red */
+.el-button--danger {
+  --el-button-bg-color: var(--color-danger);
+  --el-button-border-color: var(--color-danger);
+}
+.el-button--danger.is-plain {
+  --el-button-text-color: var(--color-danger);
+  --el-button-border-color: var(--color-danger);
+}
+
+/* Warning buttons — amber */
+.el-button--warning.is-plain {
+  --el-button-text-color: var(--color-warning);
+  --el-button-border-color: var(--color-warning);
+}
+
+/* Active/pressed states */
+.el-button:active,
+.el-button:focus-visible {
+  outline-color: var(--color-primary);
 }
 
 /* ===================== Form Inputs ===================== */
@@ -226,6 +284,11 @@ h2 {
 }
 
 /* ===================== Link ===================== */
+a,
+.el-link {
+  color: var(--color-primary);
+}
+
 .el-link.el-link--primary {
   color: var(--color-primary);
 }

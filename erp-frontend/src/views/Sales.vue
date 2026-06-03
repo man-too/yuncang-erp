@@ -60,8 +60,8 @@
         <el-table-column prop="credit_limit" label="信用额度" width="120" align="right" />
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" @click="openEditCustomerDialog(row)">编辑</el-button>
-            <el-button size="small" type="danger" @click="handleDeleteCustomer(row.id)">删除</el-button>
+            <el-button size="small" plain @click="openEditCustomerDialog(row)">编辑</el-button>
+            <el-button size="small" type="danger" plain @click="handleDeleteCustomer(row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -140,8 +140,8 @@
         </el-table-column>
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" @click="viewSODetail(row)">编辑</el-button>
-            <el-button size="small" type="danger" @click="handleDeleteSO(row.id)">删除</el-button>
+            <el-button size="small" plain @click="viewSODetail(row)">编辑</el-button>
+            <el-button size="small" type="danger" plain @click="handleDeleteSO(row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>

@@ -75,8 +75,8 @@
         </el-table-column>
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" @click="openAdjust(row)">编辑</el-button>
-            <el-button size="small" type="danger" @click="handleDelete(row.id)">删除</el-button>
+            <el-button size="small" plain @click="openAdjust(row)">编辑</el-button>
+            <el-button size="small" type="danger" plain @click="handleDelete(row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -112,8 +112,8 @@
         </el-table-column>
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
-            <el-button v-if="!row.is_resolved" size="small" @click="handleResolve(row.id)">编辑</el-button>
-            <el-button size="small" type="danger" @click="handleDeleteAlert(row.id)">删除</el-button>
+            <el-button v-if="!row.is_resolved" size="small" plain @click="handleResolve(row.id)">编辑</el-button>
+            <el-button size="small" type="danger" plain @click="handleDeleteAlert(row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>

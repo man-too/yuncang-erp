@@ -72,8 +72,8 @@
         <el-table-column prop="max_stock" label="最高库存" width="100" align="right" />
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" @click="openEditDialog(row)">编辑</el-button>
-            <el-button size="small" type="danger" @click="handleDelete(row.id)">删除</el-button>
+            <el-button size="small" plain @click="openEditDialog(row)">编辑</el-button>
+            <el-button size="small" type="danger" plain @click="handleDelete(row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
