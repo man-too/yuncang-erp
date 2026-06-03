@@ -201,14 +201,7 @@ h2 {
 }
 
 /* ===================== Pagination ===================== */
-.el-pager li.is-active {
-  background-color: var(--color-primary);
-  color: var(--text-inverse);
-}
-
-.el-pager li:hover {
-  color: var(--color-primary);
-}
+/* Keep Element Plus default pagination colors — user preference */
 
 /* ===================== Tags ===================== */
 .el-tag {
