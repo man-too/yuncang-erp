@@ -120,7 +120,15 @@ function calculateWMA(data: number[], days = 7): number {
 function computePrediction(history: number[]): number[] {
   if (history.length < 3) return Array.from({ length: 30 }, () => 0)
   const wma = calculateWMA(history)
-  return Array.from({ length: 30 }, () => wma)
+  // Compute micro-volatility from last 7 days
+  const last7 = history.slice(-7)
+  const avg = last7.reduce((s, v) => s + v, 0) / last7.length
+  const stdDev = Math.sqrt(last7.reduce((s, v) => s + (v - avg) ** 2, 0) / 7)
+  const volatility = stdDev * 0.3
+  return Array.from({ length: 30 }, (_, i) => {
+    const noise = Math.sin(i * 2.7 + 1.3) * volatility
+    return Math.max(0, Math.round(wma + noise))
+  })
 }
 
 const chartOption = computed(() => {
@@ -130,6 +138,29 @@ const chartOption = computed(() => {
     const qtys = aggregateData.value.map((d: any) => d.total_qty || 0)
     const amounts = aggregateData.value.map((d: any) => d.total_amount || 0)
 
+    // WMA forecast for next 2 months (weights: 0.5, 0.3, 0.2)
+    let predQtys: (number | null)[] = []
+    let predMonths: string[] = []
+    if (qtys.length >= 3) {
+      const last3 = qtys.slice(-3)
+      const wma1 = Math.round(last3[2] * 0.5 + last3[1] * 0.3 + last3[0] * 0.2)
+      // Second month uses wma1 as the most recent
+      const wma2 = Math.round(wma1 * 0.5 + last3[2] * 0.3 + last3[1] * 0.2)
+      predQtys = [wma1, wma2]
+      // Generate prediction month labels — extract last numeric segment
+      const lastMonth = months[months.length - 1]
+      const monthNums = lastMonth?.match(/\d+/g)
+      const lastMonthNum = monthNums ? parseInt(monthNums[monthNums.length - 1], 10) : 12
+      predMonths = [
+        ((lastMonthNum % 12) + 1) + '月(预)',
+        ((lastMonthNum + 1) % 12 + 1) + '月(预)',
+      ]
+    }
+
+    const allMonths = [...months, ...predMonths]
+    const barData = [...qtys, ...Array(predQtys.length).fill(null)]
+    const predLineData: (number | null)[] = [...Array(qtys.length).fill(null), ...predQtys]
+
     return {
       tooltip: {
         trigger: 'axis',
@@ -137,30 +168,37 @@ const chartOption = computed(() => {
         formatter: (params: any) => {
           let tip = params[0].axisValue + '<br/>'
           params.forEach((p: any) => {
+            if (p.value == null) return
             const val = p.seriesName === '销售金额' ? '¥' + (p.value || 0).toLocaleString() : (p.value || 0)
             tip += `${p.marker} ${p.seriesName}: ${val}<br/>`
           })
           return tip
         },
       },
-      legend: { data: ['销售数量', '销售金额'], bottom: 0 },
+      legend: { data: ['销售数量', '销售金额', '预测'], bottom: 0 },
       grid: { left: 60, right: 60, top: 30, bottom: 50 },
-      xAxis: { type: 'category', data: months, axisLabel: { fontSize: 11 } },
+      xAxis: { type: 'category', data: allMonths, axisLabel: { fontSize: 11 } },
       yAxis: [
         { type: 'value', name: '数量', position: 'left' },
         { type: 'value', name: '金额(元)', position: 'right', axisLabel: { formatter: (v: number) => v >= 10000 ? (v / 10000).toFixed(0) + '万' : v } },
       ],
       series: [
         {
-          name: '销售数量', type: 'bar', data: qtys, yAxisIndex: 0,
+          name: '销售数量', type: 'bar', data: barData, yAxisIndex: 0,
           itemStyle: { color: '#005BF5', borderRadius: [4, 4, 0, 0] },
           barWidth: '40%',
         },
         {
-          name: '销售金额', type: 'line', data: amounts, yAxisIndex: 1, smooth: true,
+          name: '销售金额', type: 'line', data: [...amounts, ...Array(predQtys.length).fill(null)], yAxisIndex: 1, smooth: true,
           lineStyle: { color: '#fc8452', width: 2.5 },
           itemStyle: { color: '#fc8452' },
           symbol: 'circle', symbolSize: 8,
+        },
+        {
+          name: '预测', type: 'line', smooth: true, data: predLineData, yAxisIndex: 0,
+          lineStyle: { type: 'dashed', width: 2, color: '#ff6b6b' },
+          itemStyle: { color: '#ff6b6b' },
+          symbol: 'diamond', symbolSize: 8,
         },
       ],
     }

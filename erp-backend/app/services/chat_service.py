@@ -35,6 +35,12 @@ render_comprehensive_diagnosis — 供应链综合诊断（健康评分雷达图
 render_purchase_advice — 采购建议（补货柱状图+推荐供应商表格+费用估算），当用户问"采购建议"/"补货推荐"时调用
 recommend_restock / recommend_supplier — 多维度推荐
 
+库存分析规则：当返回库存相关 blocks（图表或表格）时，必须在 content 中包含文字分析：
+1. 列出需补货的产品及建议补货量
+2. 说明理由（当前库存量、安全库存量、近期销量趋势）
+3. 按紧迫程度排序
+4. 用简洁的中文表达，控制在 200 字以内
+
 ## 回复格式（必须返回JSON）
 {"content": "markdown文字", "blocks": [可视化块]}
 - 时间序列→折线图, 对比数据→柱状图, 关系数据→热力图, 列表→表格
@@ -595,8 +601,79 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
 
 
 def _parse_response(raw: str | None) -> dict:
+    """解析 LLM 返回的原始文本为 {content, blocks} 结构"""
+
+    def _extract_embedded_chart_json(result: dict) -> dict:
+        """从 content 中提取嵌入的 chart JSON 对象，移入 blocks 列表"""
+        import re
+        content = result.get("content", "")
+        if not content:
+            return result
+        blocks = result.get("blocks", [])
+        # Loop until no more chart JSON found in content
+        while True:
+            # Find pattern {"type":"chart" or {"type": "chart"
+            match = re.search(r'\{\s*"type"\s*:\s*"chart"', content)
+            if not match:
+                break
+            start = match.start()
+            # Brace-match to find the complete JSON object
+            depth = 0
+            in_string = False
+            escape_next = False
+            end = -1
+            for i in range(start, len(content)):
+                ch = content[i]
+                if escape_next:
+                    escape_next = False
+                    continue
+                if ch == "\\":
+                    escape_next = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+            if end == -1:
+                # No matching close brace, stop
+                break
+            json_str = content[start:end]
+            try:
+                obj = json.loads(json_str)
+                if isinstance(obj, dict) and obj.get("type") == "chart" and "data" in obj:
+                    blocks.append({
+                        "type": "chart",
+                        "chartType": obj.get("chartType", "line"),
+                        "data": obj.get("data", {}),
+                    })
+                    # Remove the JSON fragment from content
+                    content = content[:start] + content[end:]
+                    # Clean up extra whitespace/newlines
+                    content = re.sub(r'\s{2,}', ' ', content).strip()
+                    continue
+            except json.JSONDecodeError:
+                pass
+            # If we got here, the match didn't produce a valid chart JSON; skip it
+            break
+
+        # If content is empty or only whitespace after extraction, set default message
+        if not content.strip():
+            content = "图表数据已生成，请查看上方图表。"
+
+        result["content"] = content
+        result["blocks"] = blocks
+        return result
+
     if not raw:
-        return {"content": "AI 处理完成，请查看上方图表数据。", "blocks": []}
+        return _extract_embedded_chart_json({"content": "AI 处理完成，请查看上方图表数据。", "blocks": []})
     text = raw.strip()
 
     def try_parse(t: str) -> dict | None:
@@ -620,7 +697,7 @@ def _parse_response(raw: str | None) -> dict:
     # Try direct parse
     result = try_parse(text)
     if result:
-        return result
+        return _extract_embedded_chart_json(result)
 
     # Try stripping markdown code blocks: ```json ... ``` or ``` ... ```
     import re
@@ -628,7 +705,7 @@ def _parse_response(raw: str | None) -> dict:
     if m:
         result = try_parse(m.group(1).strip())
         if result:
-            return result
+            return _extract_embedded_chart_json(result)
 
     # Bug 1.5: Try ALL {...} candidates (last to first), prefer ones with content/blocks keys
     candidates = []
@@ -674,13 +751,13 @@ def _parse_response(raw: str | None) -> dict:
             try:
                 parsed = json.loads(candidate)
                 if isinstance(parsed, dict) and ("content" in parsed or "blocks" in parsed):
-                    return result
+                    return _extract_embedded_chart_json(result)
             except json.JSONDecodeError:
                 pass
             # Keep first valid result as fallback
             if best_result is None:
                 best_result = result
     if best_result:
-        return best_result
+        return _extract_embedded_chart_json(best_result)
 
-    return {"content": raw, "blocks": []}
+    return _extract_embedded_chart_json({"content": raw, "blocks": []})

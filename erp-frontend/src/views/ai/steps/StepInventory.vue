@@ -1,43 +1,32 @@
 <template>
   <div class="step-inventory">
-    <!-- Section 1: Heatmap -->
+    <!-- Section 1: 库存充裕率条形图 -->
     <el-collapse v-model="activeSections" class="inventory-collapse" @change="onCollapseChange">
-      <el-collapse-item title="库存热力图" name="heatmap">
-        <div v-loading="heatmapLoading" class="chart-area">
+      <el-collapse-item title="库存充裕率概览" name="chart">
+        <div v-loading="chartLoading" class="chart-area">
           <v-chart
-            ref="heatmapChartRef"
-            v-if="!heatmapLoading && hasData"
+            ref="barChartRef"
+            v-if="!chartLoading && hasData"
             :option="chartOption"
             autoresize
-            style="height: 340px;"
-            @click="onHeatmapClick"
+            style="height: 400px;"
           />
-          <el-empty v-else-if="!heatmapLoading" description="暂无库存数据" :image-size="80" />
+          <el-empty v-else-if="!chartLoading" description="暂无库存数据" :image-size="80" />
+        </div>
+        <!-- AI 分析结果 -->
+        <div class="ai-analysis-section">
+          <div v-if="aiLoading" class="ai-loading" v-loading="true" element-loading-text="AI 正在分析库存...">
+            <span style="margin-left: 8px;">AI 正在分析库存数据...</span>
+          </div>
+          <el-alert v-else-if="store.aiRecommendation" type="success" :closable="false" show-icon>
+            <template #default>
+              <div class="ai-result-text">{{ aiResultText }}</div>
+            </template>
+          </el-alert>
+          <div v-else class="ai-placeholder">AI 分析暂时不可用</div>
         </div>
       </el-collapse-item>
     </el-collapse>
-
-    <!-- Section 2: AI Recommendation -->
-    <div class="ai-section">
-      <div class="section-row">
-        <span class="section-title">AI 智能推荐分析</span>
-        <el-button type="warning" size="small" @click="onRecommend" :loading="aiLoading">
-          智能推荐
-        </el-button>
-      </div>
-      <div class="ai-content">
-        <div v-if="aiLoading" class="ai-loading">
-          <el-icon class="is-loading"><Loading /></el-icon>
-          <span>AI 正在分析库存数据，请稍候...</span>
-        </div>
-        <el-alert v-else-if="aiResultText" type="success" :closable="false" show-icon>
-          <template #default>
-            <div class="ai-result-text">{{ aiResultText }}</div>
-          </template>
-        </el-alert>
-        <div v-else class="ai-placeholder">点击「智能推荐」获取 AI 补货建议</div>
-      </div>
-    </div>
 
     <!-- Section 3: 补货清单 -->
     <div class="table-section">
@@ -137,109 +126,139 @@ import { ref, computed, onMounted, nextTick } from 'vue'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
-import { HeatmapChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent, VisualMapComponent, LegendComponent } from 'echarts/components'
-import { Loading } from '@element-plus/icons-vue'
+import { BarChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent, LegendComponent, TitleComponent } from 'echarts/components'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { usePurchaseDecisionStore } from '@/stores/purchaseDecision'
 import { inventoryApi, productApi } from '@/api'
 
-use([CanvasRenderer, HeatmapChart, GridComponent, TooltipComponent, VisualMapComponent, LegendComponent])
+use([CanvasRenderer, BarChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent])
 
 const store = usePurchaseDecisionStore()
 
-// -- Section 1: Heatmap --
-const heatmapLoading = ref(false)
-const heatmapData = ref<any[]>([])
-const activeSections = ref<string[]>(['heatmap'])
-const heatmapChartRef = ref<any>(null)
+// -- Section 1: 库存充裕率条形图 --
+const chartLoading = ref(false)
+const inventoryItems = ref<any[]>([])
+const activeSections = ref<string[]>(['chart'])
+const barChartRef = ref<any>(null)
 
-const hasData = computed(() => heatmapData.value.length > 0)
+const hasData = computed(() => inventoryItems.value.length > 0)
 
-const warehouseNames = computed(() => {
-  const names = [...new Set(heatmapData.value.map((d: any) => d.warehouse_name))].filter(Boolean)
-  return names.length ? names : ['默认仓库']
+interface SufficiencyItem {
+  product_name: string
+  current_qty: number
+  min_stock: number
+  max_stock: number
+  sufficiency: number
+}
+
+const sufficiencyData = computed<SufficiencyItem[]>(() => {
+  return inventoryItems.value
+    .map((item: any) => {
+      const currentQty = item.quantity ?? 0
+      const maxStock = item.max_stock ?? 0
+      const minStock = item.min_stock ?? 0
+      let sufficiency = 0
+      if (maxStock > 0) {
+        sufficiency = (currentQty / maxStock) * 100
+      } else if (minStock > 0) {
+        sufficiency = (currentQty / minStock) * 50
+      }
+      sufficiency = Math.min(Math.max(sufficiency, 0), 100)
+      return {
+        product_name: item.product_name || '未知产品',
+        current_qty: currentQty,
+        min_stock: minStock,
+        max_stock: maxStock,
+        sufficiency: Math.round(sufficiency * 10) / 10,
+      }
+    })
+    .sort((a, b) => a.sufficiency - b.sufficiency) // 升序排列，最缺货的在最上面
 })
-const productNames = computed(() => {
-  const names = [...new Set(heatmapData.value.map((d: any) => d.product_name))].filter(Boolean)
-  return names.length ? names : ['默认产品']
-})
+
+function getBarColor(value: number): string {
+  if (value < 30) return '#ef5350'
+  if (value < 60) return '#ff9800'
+  return '#4caf50'
+}
 
 const chartOption = computed(() => {
-  const whNames = warehouseNames.value
-  const prodNames = productNames.value
-  const whIdx: Record<string, number> = Object.fromEntries(whNames.map((n, i) => [n, i]))
-  const prodIdx: Record<string, number> = Object.fromEntries(prodNames.map((n, i) => [n, i]))
-  const data = heatmapData.value.map((d: any) => [
-    whIdx[d.warehouse_name] ?? 0, prodIdx[d.product_name] ?? 0, d.alert_level ?? 0,
-  ])
+  const data = sufficiencyData.value
+  const categories = data.map(d => d.product_name)
+  const values = data.map(d => d.sufficiency)
+  const bgValues = data.map(d => 100 - d.sufficiency)
+
   return {
-    title: { text: '库存状态热力图', left: 'center', textStyle: { fontSize: 14, fontWeight: 'bold' } },
+    title: { text: '库存充裕率概览', left: 'center', textStyle: { fontSize: 14, fontWeight: 'bold' } },
     tooltip: {
-      position: 'top',
-      formatter: (p: any) => {
-        const item = heatmapData.value.find(
-          (d: any) => d.warehouse_name === whNames[p.data[0]] && d.product_name === prodNames[p.data[1]]
-        )
-        if (!item) return ''
-        const status = item.alert_level >= 0.6 ? '告警' : item.alert_level >= 0.3 ? '偏高/偏低' : '正常'
-        return `<b>${item.product_name}</b><br/>仓库: ${item.warehouse_name}<br/>库存: ${item.quantity} / 阈值: ${item.min_stock}-${item.max_stock}<br/>状态: ${status}`
+      trigger: 'axis' as const,
+      axisPointer: { type: 'shadow' as const },
+      formatter: (params: any) => {
+        const idx = params[0]?.dataIndex
+        if (idx == null) return ''
+        const item = data[idx]
+        return `<b>${item.product_name}</b><br/>当前库存: ${item.current_qty}<br/>安全库存: ${item.min_stock}~${item.max_stock}<br/>充裕率: ${item.sufficiency}%`
       },
     },
-    grid: { left: 160, right: 40, top: 50, bottom: 50 },
-    xAxis: { type: 'category', data: whNames, splitArea: { show: true }, axisLabel: { fontSize: 11 } },
-    yAxis: { type: 'category', data: prodNames, splitArea: { show: true }, axisLabel: { width: 140, overflow: 'truncate', fontSize: 11 } },
-    visualMap: { min: 0, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: { color: ['#e8f5e9', '#fff9c4', '#ffcc80', '#ef5350'] } },
-    series: [{ name: '库存状态', type: 'heatmap', data, label: { show: data.length < 50 }, emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.5)' } } }],
+    grid: { left: 160, right: 40, top: 50, bottom: 30 },
+    xAxis: {
+      type: 'value' as const,
+      max: 100,
+      axisLabel: { formatter: '{value}%' },
+    },
+    yAxis: {
+      type: 'category' as const,
+      data: categories,
+      axisLabel: { width: 140, overflow: 'truncate', fontSize: 11 },
+    },
+    series: [
+      {
+        name: '充裕率',
+        type: 'bar' as const,
+        stack: 'total',
+        data: values.map(v => ({
+          value: v,
+          itemStyle: { color: getBarColor(v) },
+        })),
+        barWidth: '60%',
+      },
+      {
+        name: '背景',
+        type: 'bar' as const,
+        stack: 'total',
+        data: bgValues,
+        itemStyle: { color: '#e0e0e0' },
+        barWidth: '60%',
+        z: -1,
+        tooltip: { show: false },
+      },
+    ],
   }
 })
 
-async function loadHeatmap() {
-  heatmapLoading.value = true
-  try { heatmapData.value = (await inventoryApi.heatmap()) || [] }
-  finally { heatmapLoading.value = false }
+async function loadInventoryData() {
+  chartLoading.value = true
+  try {
+    const res: any = await inventoryApi.stock({ page_size: 100 })
+    inventoryItems.value = res?.items || []
+  } catch {
+    inventoryItems.value = []
+  } finally {
+    chartLoading.value = false
+  }
 }
 
 // -- Collapse change → resize chart to avoid ghost rendering --
 function onCollapseChange(val: string[]) {
-  if (val.includes('heatmap')) {
+  if (val.includes('chart')) {
     nextTick(() => {
       setTimeout(() => {
-        const chart = heatmapChartRef.value
+        const chart = barChartRef.value
         if (chart) chart.resize()
       }, 300)
     })
   }
-}
-
-// -- Heatmap click → add to restock list --
-function onHeatmapClick(params: any) {
-  if (!params.data) return
-  const whName = warehouseNames.value[params.data[0]]
-  const prodName = productNames.value[params.data[1]]
-  const item = heatmapData.value.find(
-    (d: any) => d.warehouse_name === whName && d.product_name === prodName
-  )
-  if (!item) return
-  const exists = store.allProducts.find(p => p.product_id === item.product_id)
-  if (exists) {
-    ElMessage.warning(`${item.product_name} 已在补货清单中`)
-    return
-  }
-  store.addToProducts({
-    id: item.product_id,
-    name: item.product_name,
-    code: item.product_code || '',
-    warehouse_id: item.warehouse_id || 1,
-    warehouse_name: item.warehouse_name || '默认仓库',
-    current_qty: item.quantity || 0,
-    min_stock: item.min_stock || 0,
-    max_stock: item.max_stock || 0,
-    unit: item.unit || '个',
-    purchase_price: item.purchase_price || 0,
-  })
-  ElMessage.success(`${item.product_name} 已添加到补货清单`)
 }
 
 // -- Section 2: AI --
@@ -261,7 +280,7 @@ const aiResultText = computed(() => {
   return parts.join('\n') || 'AI 已完成分析，请查看补货清单'
 })
 
-async function onRecommend() {
+async function loadAIRecommendation() {
   aiLoading.value = true
   try {
     await store.getRecommendation()
@@ -282,10 +301,12 @@ async function onRecommend() {
           }
         }
       }
-      ElMessage.success('AI 推荐已加载')
     }
-  } catch { ElMessage.warning('推荐服务暂不可用，请手动选择') }
-  finally { aiLoading.value = false }
+  } catch {
+    // AI 分析暂时不可用，静默处理
+  } finally {
+    aiLoading.value = false
+  }
 }
 
 // -- Section 3: 补货清单 --
@@ -413,7 +434,8 @@ function onSelectionChange(rows: any[]) {
 onMounted(async () => {
   await Promise.all([
     store.fetchLowStockProducts(),
-    loadHeatmap(),
+    loadInventoryData(),
+    loadAIRecommendation(),
     (async () => {
       try { warehouses.value = (await inventoryApi.warehouses.list()) || [] }
       catch { warehouses.value = [] }
@@ -430,7 +452,7 @@ onMounted(async () => {
   padding: 8px 0;
 }
 
-/* Section 1: Heatmap */
+/* Section 1: 充裕率条形图 */
 .inventory-collapse :deep(.el-collapse-item__header) {
   font-weight: 600;
   font-size: 15px;
@@ -447,30 +469,17 @@ onMounted(async () => {
   justify-content: center;
 }
 
-/* Section 2: AI */
-.ai-section {
-  border: 1px solid var(--color-success-light);
-  border-radius: 8px;
-  padding: 16px 20px;
-  background: var(--color-success-bg);
-}
-.ai-content {
-  margin-top: 12px;
+/* AI 分析区域（条形图下方） */
+.ai-analysis-section {
+  margin-top: 16px;
   min-height: 40px;
 }
-.ai-loading {
+.ai-analysis-section .ai-loading {
   display: flex;
   align-items: center;
-  gap: 10px;
   color: var(--text-secondary);
   font-size: 13px;
-}
-.ai-loading .is-loading {
-  animation: rotating 2s linear infinite;
-}
-@keyframes rotating {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  min-height: 40px;
 }
 .ai-placeholder {
   color: var(--text-secondary);

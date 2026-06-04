@@ -7,8 +7,8 @@
         <!-- 文字内容（简单 Markdown） -->
         <div class="msg-content" v-html="renderedContent" />
 
-        <!-- 结构化 Blocks -->
-        <div v-for="(block, bi) in blocks" :key="bi" class="msg-block">
+        <!-- 结构化 Blocks (原有 + 防御性提取) -->
+        <div v-for="(block, bi) in allBlocks" :key="bi" class="msg-block">
           <!-- 图表 -->
           <div v-if="block.type === 'chart'" class="chart-container">
             <v-chart v-if="hasValidChartData(block)" :option="chartWithDefaultTitle(block)" autoresize style="height: 320px;" />
@@ -134,10 +134,73 @@ defineEmits<{
 
 const router = useRouter()
 
+// 防御性处理：检测并提取 content 中残留的 chart JSON
+function sanitizeContent(content: string, blocks: MessageBlock[]): { cleanContent: string, extraBlocks: MessageBlock[] } {
+  const extraBlocks: MessageBlock[] = []
+  let cleanContent = content
+
+  // 检测 content 中是否包含 {"type":"chart" 或 {"type": "chart" 模式
+  const chartPattern = /\{\s*"type"\s*:\s*"chart"/g
+  let match
+  while ((match = chartPattern.exec(cleanContent)) !== null) {
+    const start = match.index
+    // 用花括号匹配提取完整 JSON
+    let depth = 0
+    let inString = false
+    let escape = false
+    let end = start
+    for (let i = start; i < cleanContent.length; i++) {
+      const ch = cleanContent[i]
+      if (escape) { escape = false; continue }
+      if (ch === '\\') { escape = true; continue }
+      if (ch === '"') { inString = !inString; continue }
+      if (inString) continue
+      if (ch === '{') depth++
+      else if (ch === '}') {
+        depth--
+        if (depth === 0) { end = i + 1; break }
+      }
+    }
+    if (end > start) {
+      const jsonStr = cleanContent.substring(start, end)
+      try {
+        const obj = JSON.parse(jsonStr)
+        if (obj.type === 'chart' && obj.data) {
+          extraBlocks.push({
+            type: 'chart',
+            chartType: obj.chartType || 'line',
+            data: obj.data,
+          })
+          cleanContent = cleanContent.substring(0, start) + cleanContent.substring(end)
+          // 重置 regex lastIndex 因为内容已变
+          chartPattern.lastIndex = 0
+        }
+      } catch {
+          // 解析失败，跳过此 match 防止死循环
+          chartPattern.lastIndex = match.index + match[0].length
+        }
+    }
+  }
+
+  cleanContent = cleanContent.trim()
+  if (!cleanContent && extraBlocks.length > 0) {
+    cleanContent = '图表数据已生成，请查看下方图表。'
+  }
+
+  return { cleanContent, extraBlocks }
+}
+
+// 预处理后的内容
+const sanitized = computed(() => sanitizeContent(props.content, props.blocks))
+
 const renderedContent = computed(() => {
-  if (!props.content) return ''
-  return marked(props.content, { breaks: true })
+  const cleanContent = sanitized.value.cleanContent
+  if (!cleanContent) return ''
+  return marked(cleanContent, { breaks: true })
 })
+
+// 合并原有 blocks 和额外提取的 blocks
+const allBlocks = computed(() => [...props.blocks, ...sanitized.value.extraBlocks])
 
 function chartWithDefaultTitle(block: MessageBlock) {
   // IMPORTANT: never mutate block.data — create new object to avoid Vue reactive loops

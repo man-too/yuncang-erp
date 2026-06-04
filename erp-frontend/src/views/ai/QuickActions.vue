@@ -32,7 +32,7 @@ const isCollapsed = ref(true)
 const quickActions = [
   { icon: WarningFilled, label: '库存预警', type: 'stock_alert', description: '分析库存风险，定位紧缺产品',
     prompt: '请用热力图展示库存风险分布，用表格列出需要紧急补货的产品，按风险等级排序。' },
-  { icon: TrendCharts, label: '销售预测', type: 'sales_forecast', description: '预测未来30天销量趋势',
+  { icon: TrendCharts, label: '销售数据', type: 'sales_forecast', description: '查看销售趋势与数据洞察',
     prompt: '请分析销售趋势数据，给出备货建议和销售洞察。' },
   { icon: Trophy, label: '供应商排名', type: 'supplier_ranking', description: '多维度评估供应商表现',
     prompt: '请用柱状图展示各供应商评分对比，用表格列出综合排名，从质量、交付、价格、服务四个维度分析。' },

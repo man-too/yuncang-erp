@@ -231,22 +231,48 @@ export const useChatStore = defineStore('chat', () => {
         if (items.length === 0) return []
         const months = items.map((i: any) => i.date || i.month || '')
         const amounts = items.map((i: any) => i.amount || i.total_amount || 0)
+
+        // WMA prediction: use last 3 months with weights [0.5, 0.3, 0.2] (most recent first)
+        const last3 = amounts.slice(-3)
+        const pred1 = last3.length >= 3
+          ? last3[2] * 0.5 + last3[1] * 0.3 + last3[0] * 0.2
+          : amounts[amounts.length - 1] || 0
+        const pred2 = pred1 * 0.5 + last3[2] * 0.3 + last3[1] * 0.2
+
+        // Generate forecast month labels — extract last numeric segment from month string
+        const lastMonth = months[months.length - 1] || ''
+        const monthNums = lastMonth.match(/\d+/g)
+        const lastMonthNum = monthNums ? parseInt(monthNums[monthNums.length - 1], 10) : 0
+        const predLabel1 = `${(lastMonthNum % 12) + 1}月(预)`
+        const predLabel2 = `${((lastMonthNum + 1) % 12) + 1}月(预)`
+
+        // Append forecast months and pad data for alignment
+        const allMonths = [...months, predLabel1, predLabel2]
+        const historicalData = [...amounts, null, null]
+        const forecastData = [...months.map(() => null), pred1, pred2]
+
         return [{
           type: 'chart', chartType: 'line',
           data: {
             title: { text: '月度销售趋势', left: 'center', textStyle: { fontSize: 14 } },
             tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-            legend: { data: ['销售额'], bottom: 0 },
+            legend: { data: ['销售额', '预测'], bottom: 0 },
             toolbox: { feature: { saveAsImage: {}, dataView: { readOnly: false }, restore: {} } },
             dataZoom: [{ type: 'inside' }, { type: 'slider', bottom: 30 }],
             grid: { left: 60, right: 30, top: 50, bottom: 80 },
-            xAxis: { type: 'category', data: months },
+            xAxis: { type: 'category', data: allMonths },
             yAxis: { type: 'value', name: '金额 (¥)' },
             series: [{
-              name: '销售额', type: 'line', smooth: true, data: amounts,
+              name: '销售额', type: 'line', smooth: true, data: historicalData,
               lineStyle: { color: '#5470c6', width: 2.5 },
               areaStyle: { color: 'rgba(84,112,198,0.12)' },
               emphasis: { scale: 1.8 },
+            }, {
+              name: '预测', type: 'line', smooth: true, data: forecastData,
+              lineStyle: { type: 'dashed', width: 2, color: '#ff6b6b' },
+              itemStyle: { color: '#ff6b6b' },
+              symbol: 'diamond',
+              symbolSize: 8,
             }],
           },
         }]

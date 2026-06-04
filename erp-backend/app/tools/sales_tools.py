@@ -1,4 +1,5 @@
 """销售历史与预测工具"""
+import random
 from datetime import date, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -80,8 +81,8 @@ def _query_sales_history(args: dict, db: Session) -> dict:
     return {"items": items, "total_quantity": total_qty, "total_amount": total_amount, "days": days}
 
 
-def _wma_fallback(history: list[dict], days: int = 30) -> list[int]:
-    """加权移动平均回退预测：用最近7天数据，权重 [0.05, 0.08, 0.12, 0.15, 0.18, 0.22, 0.20]"""
+def _wma_fallback(history: list[dict], days: int = 30, product_name: str | None = None) -> list[int]:
+    """加权移动平均回退预测：用最近7天数据，权重 [0.05, 0.08, 0.12, 0.15, 0.18, 0.22, 0.20]，加微波动"""
     weights = [0.05, 0.08, 0.12, 0.15, 0.18, 0.22, 0.20]
     quantities = [h.get("quantity", 0) for h in history]
     recent = quantities[-7:]
@@ -90,7 +91,18 @@ def _wma_fallback(history: list[dict], days: int = 30) -> list[int]:
         recent.insert(0, recent[0] if recent else 0)
     w = weights[-len(recent):]
     wma = sum(wi * val for wi, val in zip(w, recent)) / sum(w)
-    return [round(wma)] * days
+
+    # Compute standard deviation for micro-volatility
+    avg = sum(recent) / len(recent)
+    std_dev = (sum((v - avg) ** 2 for v in recent) / len(recent)) ** 0.5
+    volatility = std_dev * 0.3
+
+    # Stable seeded random for reproducible micro-volatility (hash() is randomized per process in Python)
+    import hashlib
+    seed = int(hashlib.md5((product_name or "").encode()).hexdigest(), 16) % (2**32)
+    rng = random.Random(seed)
+
+    return [max(0, round(wma + rng.gauss(0, volatility))) for _ in range(days)]
 
 
 def _forecast_sales(args: dict, db: Session) -> dict:
@@ -120,7 +132,7 @@ def _forecast_sales(args: dict, db: Session) -> dict:
     if ai and ai.get("predictions"):
         predictions = ai["predictions"]
     else:
-        predictions = _wma_fallback(history, 30)
+        predictions = _wma_fallback(history, 30, product_name=prod.name)
 
     # Generate prediction dates
     last_date = rows[-1][0] if rows else date.today()
