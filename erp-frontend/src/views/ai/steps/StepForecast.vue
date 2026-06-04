@@ -308,10 +308,12 @@ async function onProductChange() {
 
 // -- Table helpers --
 function getSupplierName(productId: number): string {
-  const supplierId = store.supplierChoices[productId]
-  if (supplierId == null) return '未分配'
-  const info = store.supplierInfo[supplierId]
-  return info?.name || info?.supplier_name || `供应商#${supplierId}`
+  const supplierIds = store.supplierChoices[productId]
+  if (!supplierIds || supplierIds.length === 0) return '未分配'
+  return supplierIds.map(sid => {
+    const info = store.supplierInfo[sid]
+    return info?.name || info?.supplier_name || `供应商#${sid}`
+  }).join('、')
 }
 
 function computeAmount(productId: number): number {

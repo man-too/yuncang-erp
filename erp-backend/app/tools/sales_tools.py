@@ -80,6 +80,19 @@ def _query_sales_history(args: dict, db: Session) -> dict:
     return {"items": items, "total_quantity": total_qty, "total_amount": total_amount, "days": days}
 
 
+def _wma_fallback(history: list[dict], days: int = 30) -> list[int]:
+    """加权移动平均回退预测：用最近7天数据，权重 [0.05, 0.08, 0.12, 0.15, 0.18, 0.22, 0.20]"""
+    weights = [0.05, 0.08, 0.12, 0.15, 0.18, 0.22, 0.20]
+    quantities = [h.get("quantity", 0) for h in history]
+    recent = quantities[-7:]
+    # Pad with earliest value if fewer than 7 data points
+    while len(recent) < 7:
+        recent.insert(0, recent[0] if recent else 0)
+    w = weights[-len(recent):]
+    wma = sum(wi * val for wi, val in zip(w, recent)) / sum(w)
+    return [round(wma)] * days
+
+
 def _forecast_sales(args: dict, db: Session) -> dict:
     from app.services.ai_service import sales_forecast
 
@@ -101,6 +114,18 @@ def _forecast_sales(args: dict, db: Session) -> dict:
     history = [{"date": str(r[0]), "quantity": float(r[1] or 0)} for r in rows]
 
     ai = sales_forecast(product_name=prod.name, history_sales=history)
+
+    # Determine predictions: AI first, WMA fallback
+    predictions = []
+    if ai and ai.get("predictions"):
+        predictions = ai["predictions"]
+    else:
+        predictions = _wma_fallback(history, 30)
+
+    # Generate prediction dates
+    last_date = rows[-1][0] if rows else date.today()
+    prediction_dates = [(last_date + timedelta(days=i + 1)).strftime("%Y-%m-%d") for i in range(len(predictions))]
+
     if ai is None:
         ai = {}
 
@@ -108,7 +133,9 @@ def _forecast_sales(args: dict, db: Session) -> dict:
         "product_id": prod.id,
         "product_name": prod.name,
         "history": history[-30:],
-        "forecast_next_30d": ai.get("forecast_next_30d", 0),
+        "forecast_next_30d": ai.get("forecast_next_30d", sum(predictions) if predictions else 0),
+        "predictions": predictions,
+        "prediction_dates": prediction_dates,
         "trend": ai.get("trend", "未知"),
         "seasonal_factor": ai.get("seasonal_factor", ""),
         "suggestion": ai.get("suggestion", ""),

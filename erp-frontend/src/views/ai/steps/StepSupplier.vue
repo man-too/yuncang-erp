@@ -51,8 +51,8 @@
             <span style="float: right; color: var(--text-secondary); font-size: 12px;">{{ p.warehouse_name }}</span>
           </el-option>
         </el-select>
-        <el-tag v-if="activeProductId && store.supplierChoices[activeProductId]" type="success" size="small" style="margin-left: 12px;">
-          已选：{{ getSupplierName(store.supplierChoices[activeProductId]) }}
+        <el-tag v-if="activeProductId && store.supplierChoices[activeProductId]?.length" type="success" size="small" style="margin-left: 12px;">
+          已选：{{ store.supplierChoices[activeProductId].map(getSupplierName).join('、') }}
         </el-tag>
         <el-tag v-else-if="activeProductId" type="info" size="small" style="margin-left: 12px;">未选择供应商</el-tag>
       </div>
@@ -73,15 +73,12 @@
             size="small"
             border
             max-height="260"
-            highlight-current-row
-            @current-change="onSupplierSelect"
           >
             <el-table-column width="50" align="center">
               <template #default="{ row }">
-                <el-radio
-                  :model-value="store.supplierChoices[activeProductId!]"
-                  :value="row.id"
-                  @change="onSupplierSelect(row)"
+                <el-checkbox
+                  :model-value="(store.supplierChoices[activeProductId!] || []).includes(row.id)"
+                  @change="onSupplierToggle(row, $event)"
                 />
               </template>
             </el-table-column>
@@ -121,7 +118,7 @@
           <el-tag
             v-for="p in store.allProducts"
             :key="p.product_id"
-            :type="store.supplierChoices[p.product_id] ? 'success' : 'info'"
+            :type="store.supplierChoices[p.product_id]?.length ? 'success' : 'info'"
             size="default"
             closable
             class="choice-tag"
@@ -129,7 +126,7 @@
             @click="activeProductId = p.product_id"
           >
             {{ p.product_name }} →
-            {{ getSupplierName(store.supplierChoices[p.product_id]) || '未选' }}
+            {{ (store.supplierChoices[p.product_id] || []).map(getSupplierName).join('、') || '未选' }}
           </el-tag>
         </template>
       </div>
@@ -174,13 +171,13 @@ const supplierList = ref<any[]>([])
 // ---- Computed ----
 const chosenCount = computed(() =>
   Object.keys(store.supplierChoices).filter(
-    id => store.allProducts.some(p => p.product_id === Number(id))
+    id => store.allProducts.some(p => p.product_id === Number(id)) && store.supplierChoices[Number(id)]?.length > 0
   ).length
 )
 
 const allProductsMatched = computed(() => {
   if (store.allProducts.length === 0) return false
-  return store.allProducts.every(p => store.supplierChoices[p.product_id] != null)
+  return store.allProducts.every(p => store.supplierChoices[p.product_id]?.length > 0)
 })
 
 const supplierChartOption = computed(() => {
@@ -248,20 +245,29 @@ function onProductChange(_productId: number) {
   // Chart and table use the global rankedSuppliers which is already loaded
 }
 
-function onSupplierSelect(row: any) {
-  if (!activeProductId.value || !row) return
-  store.supplierChoices[activeProductId.value] = row.id
-  // Derive forecast price from supplier info if available
-  const supplier = supplierList.value.find((s: any) => s.id === row.id)
-  if (supplier && supplier.unit_price != null) {
-    store.forecastPrices[activeProductId.value] = supplier.unit_price
+function onSupplierToggle(supplier: any, checked: boolean) {
+  if (!activeProductId.value) return
+  if (!store.supplierChoices[activeProductId.value]) {
+    store.supplierChoices[activeProductId.value] = []
   }
-  // Cache supplier info
-  store.supplierInfo[row.id] = row
+  const list = store.supplierChoices[activeProductId.value]
+  if (checked) {
+    if (!list.includes(supplier.id)) list.push(supplier.id)
+    // Derive forecast price from supplier info if available
+    const s = supplierList.value.find((s: any) => s.id === supplier.id)
+    if (s && s.unit_price != null) {
+      store.forecastPrices[activeProductId.value] = s.unit_price
+    }
+    // Cache supplier info
+    store.supplierInfo[supplier.id] = supplier
+  } else {
+    const idx = list.indexOf(supplier.id)
+    if (idx !== -1) list.splice(idx, 1)
+  }
 }
 
 function clearChoice(productId: number) {
-  delete store.supplierChoices[productId]
+  store.supplierChoices[productId] = []
   delete store.forecastPrices[productId]
 }
 

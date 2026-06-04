@@ -36,8 +36,8 @@ export const usePurchaseDecisionStore = defineStore('purchaseDecision', () => {
   // Step 1: 风险评估结果
   const riskResults = ref<Record<number, { level: string; score: number; reason: string; daily_sales: number; shortage_days: number }>>({})
 
-  // Step 2: 供应商匹配（product_id → supplier_id）
-  const supplierChoices = ref<Record<number, number>>({})
+  // Step 2: 供应商匹配（product_id → supplier_id[]）
+  const supplierChoices = ref<Record<number, number[]>>({})
   // 供应商信息缓存（supplier_id → supplier info）
   const supplierInfo = ref<Record<number, any>>({})
   // 报价（product_id → unit_price，从所选供应商带入）

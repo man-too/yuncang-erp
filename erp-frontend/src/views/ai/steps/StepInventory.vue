@@ -1,10 +1,11 @@
 <template>
   <div class="step-inventory">
     <!-- Section 1: Heatmap -->
-    <el-collapse v-model="activeSections" class="inventory-collapse">
+    <el-collapse v-model="activeSections" class="inventory-collapse" @change="onCollapseChange">
       <el-collapse-item title="库存热力图" name="heatmap">
         <div v-loading="heatmapLoading" class="chart-area">
           <v-chart
+            ref="heatmapChartRef"
             v-if="!heatmapLoading && hasData"
             :option="chartOption"
             autoresize
@@ -132,7 +133,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -152,6 +153,7 @@ const store = usePurchaseDecisionStore()
 const heatmapLoading = ref(false)
 const heatmapData = ref<any[]>([])
 const activeSections = ref<string[]>(['heatmap'])
+const heatmapChartRef = ref<any>(null)
 
 const hasData = computed(() => heatmapData.value.length > 0)
 
@@ -197,6 +199,18 @@ async function loadHeatmap() {
   heatmapLoading.value = true
   try { heatmapData.value = (await inventoryApi.heatmap()) || [] }
   finally { heatmapLoading.value = false }
+}
+
+// -- Collapse change → resize chart to avoid ghost rendering --
+function onCollapseChange(val: string[]) {
+  if (val.includes('heatmap')) {
+    nextTick(() => {
+      setTimeout(() => {
+        const chart = heatmapChartRef.value
+        if (chart) chart.resize()
+      }, 300)
+    })
+  }
 }
 
 // -- Heatmap click → add to restock list --

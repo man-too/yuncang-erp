@@ -31,6 +31,8 @@ query_sales_history / forecast_sales — 销售相关（销售预测要两个都
 query_suppliers / rank_suppliers — 供应商相关
 query_products — 产品查询
 render_inventory_heatmap / render_sales_trend / render_supplier_ranking — 专属图表（复杂可视化）
+render_comprehensive_diagnosis — 供应链综合诊断（健康评分雷达图+仪表盘+总结表格），当用户问"综合诊断"/"供应链状况"时调用
+render_purchase_advice — 采购建议（补货柱状图+推荐供应商表格+费用估算），当用户问"采购建议"/"补货推荐"时调用
 recommend_restock / recommend_supplier — 多维度推荐
 
 ## 回复格式（必须返回JSON）
@@ -211,30 +213,27 @@ def build_welcome_message(context: dict) -> dict:
 
     content = "\n".join(parts)
 
-    # Blocks: 热销表在前，库存热力图在后
+    # Blocks: 热销表在前，库存柱状图在后
     blocks: list = [hot_table]
     if low:
         names = [p["name"] for p in low[:8]]
-        heatmap_data = []
-        for i, p in enumerate(low[:8]):
-            heatmap_data.append([i, 0, p["qty"]])
-            heatmap_data.append([i, 1, p["min"]])
+        current_qtys = [p["qty"] for p in low[:8]]
+        min_stocks = [p["min"] for p in low[:8]]
 
         blocks.append({
             "type": "chart",
-            "chartType": "heatmap",
+            "chartType": "bar",
             "data": {
                 "title": {"text": "低库存产品概览", "left": "center", "textStyle": {"fontSize": 14}},
-                "tooltip": {"trigger": "item", "formatter": "{b}\n{c} 件"},
+                "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
+                "legend": {"data": ["当前库存", "安全库存"], "bottom": 0},
+                "grid": {"top": 50, "bottom": 60, "left": 60, "right": 30},
                 "xAxis": {"type": "category", "data": names, "axisLabel": {"rotate": 30, "fontSize": 11}},
-                "yAxis": {"type": "category", "data": ["当前库存", "安全库存线"]},
-                "visualMap": {
-                    "min": 0, "max": max(p["min"] for p in low[:8]) * 1.5 if low else 100,
-                    "calculable": True, "orient": "horizontal", "left": "center", "bottom": 0,
-                    "inRange": {"color": ["#ee6666", "#fac858", "#91cc75"]}
-                },
-                "series": [{"type": "heatmap", "data": heatmap_data, "label": {"show": True}}],
-                "grid": {"top": 50, "bottom": 60, "left": 80, "right": 30},
+                "yAxis": {"type": "value", "name": "库存量"},
+                "series": [
+                    {"name": "当前库存", "type": "bar", "data": current_qtys, "itemStyle": {"color": "#5470c6"}, "barMaxWidth": 30},
+                    {"name": "安全库存", "type": "bar", "data": min_stocks, "itemStyle": {"color": "#ee6666"}, "barMaxWidth": 30},
+                ],
             }
         })
 
@@ -430,6 +429,7 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                 elif tc.function.name in (
                     "render_inventory_heatmap", "render_sales_trend",
                     "render_supplier_ranking",
+                    "render_comprehensive_diagnosis", "render_purchase_advice",
                 ):
                     # Chart tools: execute, collect direct-render blocks, also feed to LLM
                     result = execute_tool(tc.function.name, args, db)
@@ -483,6 +483,11 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                 else:
                     raise
             raw_content = resp2.choices[0].message.content
+
+            # Bug 1.4: Handle reasoning_content from second LLM call (DeepSeek thinking models)
+            msg2 = resp2.choices[0].message
+            if hasattr(msg2, 'reasoning_content') and msg2.reasoning_content:
+                logger.info(f"[Chat] 第二次调用有 reasoning_content, 长度={len(msg2.reasoning_content)}")
 
             # ═══ 日志③：第二次 AI 调用结果 ═══
             logger.info(f"[Chat] 第二次调 AI | finish: {resp2.choices[0].finish_reason} | "
@@ -540,7 +545,7 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                             "role": "tool", "tool_call_id": tc.id,
                             "content": json.dumps({"blocked": True, "message": "需用户确认"}, ensure_ascii=False)
                         })
-                    elif tc.function.name in ("render_inventory_heatmap", "render_sales_trend", "render_supplier_ranking"):
+                    elif tc.function.name in ("render_inventory_heatmap", "render_sales_trend", "render_supplier_ranking", "render_comprehensive_diagnosis", "render_purchase_advice"):
                         result = execute_tool(tc.function.name, args, db)
                         if isinstance(result, dict) and result.get("_render"):
                             if "blocks" in result:
@@ -591,7 +596,7 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
 
 def _parse_response(raw: str | None) -> dict:
     if not raw:
-        return {"content": "AI 返回了空响应，请重试或换一种问法。", "blocks": []}
+        return {"content": "AI 处理完成，请查看上方图表数据。", "blocks": []}
     text = raw.strip()
 
     def try_parse(t: str) -> dict | None:
@@ -604,8 +609,13 @@ def _parse_response(raw: str | None) -> dict:
                 "content": parsed.get("content", raw),
                 "blocks": parsed.get("blocks", []),
             }
-        # JSON array or other non-dict: treat as fallback content
-        return None
+        # Bug 1.1: JSON array or other non-dict - convert to readable string
+        if isinstance(parsed, list):
+            return {"content": json.dumps(parsed, ensure_ascii=False), "blocks": []}
+        if isinstance(parsed, (str, int, float, bool)) or parsed is None:
+            return {"content": str(parsed), "blocks": []}
+        # Fallback for any other type
+        return {"content": json.dumps(parsed, ensure_ascii=False), "blocks": []}
 
     # Try direct parse
     result = try_parse(text)
@@ -620,9 +630,13 @@ def _parse_response(raw: str | None) -> dict:
         if result:
             return result
 
-    # Try extracting the outermost JSON object by brace counting (handles nested braces)
-    start = text.find("{")
-    if start != -1:
+    # Bug 1.5: Try ALL {...} candidates (last to first), prefer ones with content/blocks keys
+    candidates = []
+    pos = 0
+    while True:
+        start = text.find("{", pos)
+        if start == -1:
+            break
         depth = 0
         in_string = False
         escape_next = False
@@ -644,9 +658,29 @@ def _parse_response(raw: str | None) -> dict:
             elif ch == "}":
                 depth -= 1
                 if depth == 0:
-                    result = try_parse(text[start:i + 1])
-                    if result:
-                        return result
+                    candidates.append(text[start:i + 1])
+                    pos = i + 1
                     break
+        else:
+            # No matching close brace found for this open brace
+            break
+
+    # Try candidates from last to first, preferring ones with content/blocks keys
+    best_result = None
+    for candidate in reversed(candidates):
+        result = try_parse(candidate)
+        if result:
+            # Check if this dict has content or blocks keys (preferred)
+            try:
+                parsed = json.loads(candidate)
+                if isinstance(parsed, dict) and ("content" in parsed or "blocks" in parsed):
+                    return result
+            except json.JSONDecodeError:
+                pass
+            # Keep first valid result as fallback
+            if best_result is None:
+                best_result = result
+    if best_result:
+        return best_result
 
     return {"content": raw, "blocks": []}

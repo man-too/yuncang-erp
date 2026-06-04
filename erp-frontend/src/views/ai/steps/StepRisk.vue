@@ -134,6 +134,9 @@ const riskLevelLabels: Record<string, string> = {
   high: '高风险',
   medium: '中风险',
   low: '低风险',
+  warning: '中风险',
+  normal: '低风险',
+  unknown: '未知风险',
 }
 
 const riskLevelTagTypes: Record<string, string> = {
@@ -141,6 +144,9 @@ const riskLevelTagTypes: Record<string, string> = {
   high: 'warning',
   medium: '',
   low: 'success',
+  warning: '',
+  normal: 'success',
+  unknown: 'info',
 }
 
 // ----- 加载风险评估 -----
@@ -223,9 +229,21 @@ const groups = computed(() => {
     low: [],
   }
 
+  // Map alert_level values to risk group buckets
+  const levelToGroup: Record<string, string> = {
+    critical: 'critical',
+    high: 'high',
+    medium: 'medium',
+    low: 'low',
+    warning: 'medium',
+    normal: 'low',
+    unknown: 'low',
+  }
+
   for (const product of store.allProducts) {
     const info = riskInfo(product.product_id)
-    const level = info?.level || 'low'
+    const rawLevel = info?.level || 'low'
+    const level = levelToGroup[rawLevel] || 'low'
     if (map[level]) {
       map[level].push(product)
     } else {

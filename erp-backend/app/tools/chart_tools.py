@@ -67,6 +67,22 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "render_comprehensive_diagnosis",
+            "description": "生成供应链综合诊断图表，包含健康评分雷达图、综合仪表盘和各维度分析表格。当用户询问综合诊断、供应链状况、全链路分析时调用",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "render_purchase_advice",
+            "description": "生成采购建议图表，包含补货清单柱状图、推荐供应商表格和费用估算。当用户询问采购建议、补货推荐、需要采购什么时调用",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 
@@ -81,6 +97,10 @@ def execute(name: str, args: dict, db: Session) -> dict | None:
         return _recommend_restock(args, db)
     if name == "recommend_supplier":
         return _recommend_supplier(args, db)
+    if name == "render_comprehensive_diagnosis":
+        return _render_comprehensive_diagnosis(db)
+    if name == "render_purchase_advice":
+        return _render_purchase_advice(db)
     return None
 
 
@@ -181,7 +201,7 @@ def _render_inventory_heatmap(db: Session) -> dict:
         "chartType": "heatmap",
         "data": {
             "title": {"text": "库存状态热力图", "left": "center", "textStyle": {"fontSize": 14, "fontWeight": "bold"}},
-            "tooltip": {"position": "top", "formatter": "function(params) { return '<b>'+params.name+'</b><br/>状态等级: '+params.data.value[2]; }"},
+            "tooltip": {"position": "top", "formatter": "{b}<br/>状态等级: {c}"},
             "grid": {"left": 160, "right": 60, "top": 50, "bottom": 60},
             "xAxis": {"type": "category", "data": wh_names, "splitArea": {"show": True}, "axisLabel": {"fontSize": 11}},
             "yAxis": {"type": "category", "data": prod_names, "splitArea": {"show": True}, "axisLabel": {"fontSize": 11}},
@@ -560,3 +580,340 @@ def _recommend_supplier(args: dict, db: Session) -> dict:
         "suppliers": results,
         "total": len(results),
     }
+
+
+# ── 6. Comprehensive Diagnosis ─────────────────────────────────────────
+
+def _render_comprehensive_diagnosis(db: Session) -> dict:
+    """供应链综合诊断：健康评分雷达图 + 综合仪表盘 + 维度分析表格"""
+    blocks = []
+
+    # --- Dimension 1: Inventory health ---
+    total_items = db.query(Inventory).filter(Inventory.quantity >= 0).count()
+    out_of_stock_items = (
+        db.query(Inventory)
+        .join(Product, Inventory.product_id == Product.id)
+        .filter(Inventory.quantity <= Product.min_stock, Inventory.quantity >= 0)
+        .count()
+    )
+    if total_items > 0:
+        stockout_rate = out_of_stock_items / total_items
+        inventory_health = round(100 * (1 - stockout_rate), 1)
+    else:
+        inventory_health = 100.0
+
+    # --- Dimension 2: Sales trend ---
+    six_months_ago = date.today() - timedelta(days=180)
+    date_fmt = func.date_format(SaleOrder.order_date, "%Y-%m")
+    monthly_sales = (
+        db.query(
+            date_fmt.label("month"),
+            func.sum(SaleOrderItem.total_price).label("amount"),
+        )
+        .join(SaleOrderItem, SaleOrderItem.order_id == SaleOrder.id)
+        .filter(SaleOrder.order_date >= six_months_ago, SaleOrder.status != "cancelled")
+        .group_by(date_fmt)
+        .order_by(date_fmt)
+        .all()
+    )
+    if len(monthly_sales) >= 2:
+        amounts = [float(r.amount or 0) for r in monthly_sales]
+        growth_rate = (amounts[-1] - amounts[-2]) / amounts[-2] if amounts[-2] > 0 else 0
+        if growth_rate >= 0:
+            sales_trend_score = min(50 + growth_rate * 500, 100)
+        else:
+            sales_trend_score = max(50 + growth_rate * 500, 0)
+        sales_trend_score = round(sales_trend_score, 1)
+    else:
+        sales_trend_score = 50.0
+
+    # --- Dimension 3: Supplier performance ---
+    avg_supplier = (
+        db.query(func.avg(SupplierEvaluation.total_score))
+        .scalar()
+    )
+    supplier_score = round(float(avg_supplier or 0), 1)
+
+    # --- Dimension 4: Stockout risk ---
+    stockout_risk_score = round(100 - stockout_rate * 100, 1) if total_items > 0 else 100.0
+
+    # --- Dimension 5: Turnover rate ---
+    # Estimate from sales / inventory ratio over last 30 days
+    thirty_days_ago = date.today() - timedelta(days=30)
+    total_sales_30d = (
+        db.query(func.sum(SaleOrderItem.total_price))
+        .join(SaleOrder, SaleOrder.id == SaleOrderItem.order_id)
+        .filter(SaleOrder.order_date >= thirty_days_ago, SaleOrder.status != "cancelled")
+        .scalar()
+    ) or 0
+    total_inventory_value = (
+        db.query(func.sum(Inventory.quantity * Product.unit_price))
+        .join(Product, Inventory.product_id == Product.id)
+        .filter(Inventory.quantity > 0)
+        .scalar()
+    ) or 0
+    if total_inventory_value > 0:
+        turnover_ratio = float(total_sales_30d) / float(total_inventory_value)
+        # Normalize: ratio of 0.5-1.5 per month is healthy (score 70-90)
+        turnover_score = min(max(50 + turnover_ratio * 40, 0), 100)
+    else:
+        turnover_score = 0.0
+    turnover_score = round(turnover_score, 1)
+
+    # --- Weighted overall score ---
+    overall_score = round(
+        inventory_health * 0.30
+        + sales_trend_score * 0.25
+        + supplier_score * 0.20
+        + stockout_risk_score * 0.15
+        + turnover_score * 0.10,
+        1,
+    )
+
+    # --- Status and suggestions per dimension ---
+    def _status_and_advice(score: float, dimension: str) -> tuple[str, str]:
+        if score >= 80:
+            return "良好", f"{dimension}状况良好，继续保持现有策略"
+        elif score >= 60:
+            return "一般", f"{dimension}有改善空间，建议关注异常指标"
+        elif score >= 40:
+            return "预警", f"{dimension}需要重点关注，建议及时调整策略"
+        else:
+            return "危险", f"{dimension}严重不足，需立即采取行动"
+
+    inventory_status, inventory_advice = _status_and_advice(inventory_health, "库存")
+    sales_status, sales_advice = _status_and_advice(sales_trend_score, "销售")
+    supplier_status, supplier_advice = _status_and_advice(supplier_score, "供应商")
+    stockout_status, stockout_advice = _status_and_advice(stockout_risk_score, "缺货风险")
+    turnover_status, turnover_advice = _status_and_advice(turnover_score, "周转")
+
+    # --- Block 1: Radar chart ---
+    blocks.append({
+        "type": "chart",
+        "chartType": "radar",
+        "data": {
+            "title": {
+                "text": "供应链健康评分雷达图",
+                "left": "center",
+                "textStyle": {"fontSize": 14, "fontWeight": "bold"},
+            },
+            "tooltip": {},
+            "radar": {
+                "indicator": [
+                    {"name": "库存健康", "max": 100},
+                    {"name": "销售趋势", "max": 100},
+                    {"name": "供应商表现", "max": 100},
+                    {"name": "缺货风险", "max": 100},
+                    {"name": "周转率", "max": 100},
+                ],
+                "shape": "circle",
+                "splitNumber": 5,
+                "axisName": {"color": "#333", "fontSize": 12},
+                "splitLine": {"lineStyle": {"color": ["#eee", "#ddd", "#ccc", "#bbb", "#aaa"]}},
+                "splitArea": {"show": True, "areaStyle": {"color": ["rgba(84,112,198,0.05)", "rgba(84,112,198,0.1)"]}},
+            },
+            "series": [{
+                "name": "健康评分",
+                "type": "radar",
+                "data": [{
+                    "value": [inventory_health, sales_trend_score, supplier_score, stockout_risk_score, turnover_score],
+                    "name": "当前评分",
+                    "areaStyle": {"color": "rgba(84,112,198,0.2)"},
+                    "lineStyle": {"color": "#5470c6", "width": 2},
+                    "itemStyle": {"color": "#5470c6"},
+                }],
+            }],
+        },
+    })
+
+    # --- Block 2: Gauge chart ---
+    blocks.append({
+        "type": "chart",
+        "chartType": "gauge",
+        "data": {
+            "title": {
+                "text": "综合健康评分",
+                "left": "center",
+                "top": "5%",
+                "textStyle": {"fontSize": 14, "fontWeight": "bold"},
+            },
+            "series": [{
+                "type": "gauge",
+                "startAngle": 200,
+                "endAngle": -20,
+                "min": 0,
+                "max": 100,
+                "splitNumber": 10,
+                "itemStyle": {"color": "#5470c6"},
+                "progress": {"show": True, "width": 18},
+                "pointer": {"show": True, "length": "60%", "width": 4},
+                "axisLine": {"lineStyle": {"width": 18, "color": [[0.3, "#ee6666"], [0.7, "#fac858"], [1, "#91cc75"]]}},
+                "axisTick": {"distance": -18, "length": 6, "lineStyle": {"color": "#fff", "width": 1}},
+                "splitLine": {"distance": -18, "length": 18, "lineStyle": {"color": "#fff", "width": 2}},
+                "axisLabel": {"distance": 25, "fontSize": 11, "color": "#999"},
+                "detail": {
+                    "valueAnimation": True,
+                    "formatter": "{value}",
+                    "fontSize": 28,
+                    "fontWeight": "bold",
+                    "color": "#333",
+                    "offsetCenter": [0, "70%"],
+                },
+                "data": [{"value": overall_score, "name": "综合评分"}],
+            }],
+        },
+    })
+
+    # --- Block 3: Summary table ---
+    table_rows = [
+        {"维度": "库存健康", "评分": inventory_health, "状态": inventory_status, "建议": inventory_advice},
+        {"维度": "销售趋势", "评分": sales_trend_score, "状态": sales_status, "建议": sales_advice},
+        {"维度": "供应商表现", "评分": supplier_score, "状态": supplier_status, "建议": supplier_advice},
+        {"维度": "缺货风险", "评分": stockout_risk_score, "状态": stockout_status, "建议": stockout_advice},
+        {"维度": "周转率", "评分": turnover_score, "状态": turnover_status, "建议": turnover_advice},
+    ]
+    blocks.append({
+        "type": "table",
+        "columns": [
+            {"key": "维度", "title": "维度"},
+            {"key": "评分", "title": "评分"},
+            {"key": "状态", "title": "状态"},
+            {"key": "建议", "title": "建议"},
+        ],
+        "rows": table_rows,
+    })
+
+    return {"_render": True, "blocks": blocks}
+
+
+# ── 7. Purchase Advice ──────────────────────────────────────────────────
+
+def _render_purchase_advice(db: Session) -> dict:
+    """采购建议：补货柱状图 + 推荐供应商表格 + 费用估算"""
+    blocks = []
+
+    # Reuse low-stock logic from _recommend_restock
+    recommendations = _recommend_restock({}, db)
+    recs = recommendations.get("recommendations", [])
+
+    if not recs:
+        blocks.append({
+            "type": "table",
+            "columns": [{"key": "msg", "title": "提示"}],
+            "rows": [{"msg": "暂无需要补货的产品，库存充足"}],
+        })
+        return {"_render": True, "blocks": blocks}
+
+    # For each item, find the best supplier using evaluation scores
+    for rec in recs:
+        product_id = rec.get("product_id")
+        best_supplier_name = "-"
+        if product_id:
+            supplier_result = _recommend_supplier({"product_id": product_id}, db)
+            suppliers_list = supplier_result.get("suppliers", [])
+            if suppliers_list:
+                # Sort by total_score descending, pick the best
+                best = max(suppliers_list, key=lambda s: s.get("total_score", 0))
+                best_supplier_name = best.get("supplier_name", "-")
+        rec["推荐供应商"] = best_supplier_name
+        # Estimate purchase amount: suggested_qty * product unit_price
+        product = db.query(Product).filter(Product.id == product_id).first()
+        unit_price = float(product.unit_price) if product and product.unit_price else 0
+        estimated_amount = round(rec.get("suggested_qty", 0) * unit_price, 2)
+        rec["预估金额"] = estimated_amount
+
+    # --- Block 1: Bar chart (products x suggested qty, colored by urgency) ---
+    urgency_colors = {"critical": "#ee6666", "high": "#fac858", "medium": "#5470c6"}
+    bar_data = []
+    for rec in recs:
+        color = urgency_colors.get(rec.get("priority", "medium"), "#5470c6")
+        bar_data.append({
+            "value": rec.get("suggested_qty", 0),
+            "itemStyle": {"color": color},
+        })
+
+    blocks.append({
+        "type": "chart",
+        "chartType": "bar",
+        "data": {
+            "title": {
+                "text": "采购建议 — 建议补货量",
+                "left": "center",
+                "textStyle": {"fontSize": 14, "fontWeight": "bold"},
+            },
+            "tooltip": {"trigger": "axis"},
+            "legend": {
+                "data": ["紧急", "高优", "中等"],
+                "bottom": 0,
+                "selected": {"紧急": True, "高优": True, "中等": True},
+            },
+            "toolbox": {
+                "feature": {
+                    "saveAsImage": {},
+                    "dataView": {"readOnly": False},
+                    "restore": {},
+                }
+            },
+            "grid": {"left": 80, "right": 30, "top": 50, "bottom": 80},
+            "xAxis": {
+                "type": "category",
+                "data": [r.get("product_name", "") for r in recs],
+                "axisLabel": {"rotate": 20, "fontSize": 11},
+            },
+            "yAxis": {"type": "value", "name": "建议采购量", "nameTextStyle": {"fontSize": 12}},
+            "series": [{
+                "name": "建议采购量",
+                "type": "bar",
+                "data": bar_data,
+                "barMaxWidth": 30,
+                "label": {"show": True, "position": "top", "fontSize": 10},
+            }],
+        },
+    })
+
+    # --- Block 2: Table ---
+    table_rows = []
+    total_estimated = 0.0
+    critical_count = 0
+    for rec in recs:
+        estimated = rec.get("预估金额", 0)
+        total_estimated += estimated
+        if rec.get("priority") == "critical":
+            critical_count += 1
+        urgency_label = {"critical": "紧急", "high": "高优", "medium": "中等"}.get(rec.get("priority", ""), "中等")
+        table_rows.append({
+            "产品": rec.get("product_name", ""),
+            "当前库存": rec.get("current_qty", 0),
+            "安全库存": rec.get("min_stock", 0),
+            "建议采购量": rec.get("suggested_qty", 0),
+            "紧迫度": urgency_label,
+            "推荐供应商": rec.get("推荐供应商", "-"),
+            "预估金额": f"¥{estimated:,.2f}",
+        })
+
+    blocks.append({
+        "type": "table",
+        "columns": [
+            {"key": "产品", "title": "产品"},
+            {"key": "当前库存", "title": "当前库存"},
+            {"key": "安全库存", "title": "安全库存"},
+            {"key": "建议采购量", "title": "建议采购量"},
+            {"key": "紧迫度", "title": "紧迫度"},
+            {"key": "推荐供应商", "title": "推荐供应商"},
+            {"key": "预估金额", "title": "预估金额"},
+        ],
+        "rows": table_rows,
+    })
+
+    # --- Block 3: Summary ---
+    blocks.append({
+        "type": "table",
+        "columns": [{"key": "指标", "title": "指标"}, {"key": "值", "title": "值"}],
+        "rows": [
+            {"指标": "需补货产品数", "值": f"{len(recs)} 项"},
+            {"指标": "紧急项数", "值": f"{critical_count} 项"},
+            {"指标": "预估总金额", "值": f"¥{total_estimated:,.2f}"},
+        ],
+    })
+
+    return {"_render": True, "blocks": blocks}

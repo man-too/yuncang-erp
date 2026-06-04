@@ -39,7 +39,7 @@ def save_decision(db: Session, decision_type: str, title: str,
         title=title,
         input_data=json.dumps(input_data, ensure_ascii=False),
         output_data=json.dumps(output_data, ensure_ascii=False),
-        summary=output_data.get("suggestion") or output_data.get("summary") or output_data.get("reason") or "",
+        summary=output_data.get("suggestion") or output_data.get("summary") or output_data.get("reason") or output_data.get("error") or "AI分析完成",
         confidence=output_data.get("confidence", 0),
         related_id=related_id,
     )
@@ -157,7 +157,7 @@ def ai_stock_alert_batch(
                     "product_id": product_id,
                     "product_name": product.name,
                     "current_qty": current_qty,
-                    "risk_level": result.get("risk_level", "unknown") if result else "unknown",
+                    "risk_level": result.get("alert_level", "unknown") if result else "unknown",
                     "suggestion": result.get("suggestion", "") if result else "",
                     "ai_analysis": result,
                 })
@@ -404,15 +404,67 @@ def ai_sales_history(
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    """销售历史与预测数据"""
+    """销售历史与预测数据
+
+    - 无 product_id: 返回聚合月度数据（最近6个月）+ TOP 5 产品
+    - 有 product_id: 返回该产品的日度数据
+    """
+    if product_id is None:
+        # 聚合模式：返回月度汇总 + TOP 5 产品
+        months = 6
+        start = date.today() - timedelta(days=months * 31)
+
+        # 月度聚合数据
+        month_expr = func.date_format(SaleOrder.order_date, "%Y-%m")
+        monthly_query = db.query(
+            month_expr.label("month"),
+            func.sum(SaleOrderItem.quantity).label("total_qty"),
+            func.sum(SaleOrderItem.total_price).label("total_amount"),
+        ).join(SaleOrderItem, SaleOrderItem.order_id == SaleOrder.id)
+        monthly_query = monthly_query.filter(SaleOrder.order_date >= start)
+        monthly_query = monthly_query.group_by(month_expr).order_by(month_expr)
+        monthly_rows = monthly_query.all()
+
+        monthly_data = [
+            {"month": r.month, "total_qty": float(r.total_qty or 0), "total_amount": float(r.total_amount or 0)}
+            for r in monthly_rows
+        ]
+
+        # TOP 5 产品（按销售金额）
+        top_query = db.query(
+            SaleOrderItem.product_id,
+            func.sum(SaleOrderItem.quantity).label("total_qty"),
+            func.sum(SaleOrderItem.total_price).label("total_amount"),
+        ).join(SaleOrder, SaleOrder.id == SaleOrderItem.order_id)
+        top_query = top_query.filter(SaleOrder.order_date >= start)
+        top_query = top_query.group_by(SaleOrderItem.product_id).order_by(func.sum(SaleOrderItem.total_price).desc())
+        top_rows = top_query.limit(5).all()
+
+        # 获取产品名称
+        product_ids = [r.product_id for r in top_rows]
+        products = db.query(Product).filter(Product.id.in_(product_ids)).all() if product_ids else []
+        product_map = {p.id: p.name for p in products}
+
+        top_products = [
+            {
+                "product_id": r.product_id,
+                "name": product_map.get(r.product_id, f"#{r.product_id}"),
+                "total_qty": float(r.total_qty or 0),
+                "total_amount": float(r.total_amount or 0),
+            }
+            for r in top_rows
+        ]
+
+        return {"monthly_data": monthly_data, "top_products": top_products}
+
+    # 产品模式：返回日度数据
     query = db.query(
         SaleOrder.order_date,
         func.sum(SaleOrderItem.quantity).label("total_qty"),
         func.sum(SaleOrderItem.total_price).label("total_amount"),
     ).join(SaleOrderItem, SaleOrderItem.order_id == SaleOrder.id)
 
-    if product_id:
-        query = query.filter(SaleOrderItem.product_id == product_id)
+    query = query.filter(SaleOrderItem.product_id == product_id)
 
     start = date.today() - timedelta(days=days)
     query = query.filter(SaleOrder.order_date >= start)

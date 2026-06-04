@@ -109,21 +109,38 @@ const avgPrice = computed(() => {
 })
 
 const orderItems = computed(() => {
-  return store.allProducts.map(p => {
+  const items: any[] = []
+  for (const p of store.allProducts) {
     const qty = store.forecastQuantities[p.product_id] || p.suggested_qty || 0
+    if (qty <= 0) continue
     const price = store.forecastPrices[p.product_id] || p.purchase_price || 0
-    const sid = store.supplierChoices[p.product_id]
-    const supplier = sid ? store.supplierInfo[sid] : null
-    return {
-      product_id: p.product_id,
-      product_name: p.product_name,
-      supplier_id: sid || 1,
-      supplier_name: supplier?.name || '未指定',
-      quantity: qty,
-      unit_price: price,
-      total: qty * price,
+    const supplierIds = store.supplierChoices[p.product_id] || []
+    if (supplierIds.length === 0) {
+      items.push({
+        product_id: p.product_id,
+        product_name: p.product_name,
+        supplier_id: 1,
+        supplier_name: '未指定',
+        quantity: qty,
+        unit_price: price,
+        total: qty * price,
+      })
+    } else {
+      for (const sid of supplierIds) {
+        const supplier = store.supplierInfo[sid]
+        items.push({
+          product_id: p.product_id,
+          product_name: p.product_name,
+          supplier_id: sid,
+          supplier_name: supplier?.name || `供应商#${sid}`,
+          quantity: qty,
+          unit_price: price,
+          total: qty * price,
+        })
+      }
     }
-  }).filter(item => item.quantity > 0)
+  }
+  return items
 })
 
 async function onConfirm() {
@@ -133,16 +150,25 @@ async function onConfirm() {
   }
   submitting.value = true
   try {
-    const orderData = {
-      supplier_id: orderItems.value[0]?.supplier_id || 1,
-      items: orderItems.value.map(item => ({
-        product_id: item.product_id,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-      })),
-      remark: '由AI采购决策生成',
+    // Group items by supplier_id to create separate orders per supplier
+    const bySupplier: Record<number, any[]> = {}
+    for (const item of orderItems.value) {
+      if (!bySupplier[item.supplier_id]) bySupplier[item.supplier_id] = []
+      bySupplier[item.supplier_id].push(item)
     }
-    await purchaseApi.create(orderData)
+
+    for (const [supplierId, items] of Object.entries(bySupplier)) {
+      const orderData = {
+        supplier_id: Number(supplierId),
+        items: items.map(item => ({
+          product_id: item.product_id,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+        })),
+        remark: '由AI采购决策生成',
+      }
+      await purchaseApi.create(orderData)
+    }
     ElMessage.success('采购订单已创建成功！')
     store.close()
   } catch (e: any) {

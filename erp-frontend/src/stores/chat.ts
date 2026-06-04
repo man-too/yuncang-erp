@@ -70,7 +70,7 @@ export const useChatStore = defineStore('chat', () => {
       conversationId.value = res.conversation_id || conversationId.value
       addMessage({
         role: 'assistant',
-        content: res.content || '',
+        content: res.content || 'AI 处理完成，请查看上方图表数据。',
         blocks: (res.blocks || []).map((b: any) => normalizeBlock(b)),
       })
     } catch (e: any) {
@@ -176,7 +176,11 @@ export const useChatStore = defineStore('chat', () => {
         llmContent = res.content || ''
         llmBlocks = (res.blocks || []).map((b: any) => normalizeBlock(b))
       } catch {
-        llmContent = '抱歉，请求失败，请稍后重试。'
+        if (directBlocks.length > 0) {
+          llmContent = 'AI 文字分析暂时不可用，图表数据正常显示。'
+        } else {
+          llmContent = '抱歉，请求失败，请稍后重试。'
+        }
       }
 
       // Step 3: Merge and display

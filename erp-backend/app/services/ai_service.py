@@ -45,7 +45,40 @@ def _call_llm(system_prompt: str, user_prompt: str) -> dict | None:
             else:
                 raise
         text = resp.choices[0].message.content
-        return json.loads(text)
+        # Bug 1.2: Try JSON parse, with brace extraction fallback
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            # Try extracting JSON from text using brace matching
+            start = text.find("{")
+            if start != -1:
+                depth = 0
+                in_string = False
+                escape_next = False
+                for i in range(start, len(text)):
+                    ch = text[i]
+                    if escape_next:
+                        escape_next = False
+                        continue
+                    if ch == "\\":
+                        escape_next = True
+                        continue
+                    if ch == '"':
+                        in_string = not in_string
+                        continue
+                    if in_string:
+                        continue
+                    if ch == "{":
+                        depth += 1
+                    elif ch == "}":
+                        depth -= 1
+                        if depth == 0:
+                            try:
+                                return json.loads(text[start:i + 1])
+                            except json.JSONDecodeError:
+                                break
+            # If still fails, return content as-is with ok status
+            return {"status": "ok", "content": text, "confidence": 0.5}
     except Exception as e:
         logger.error(f"AI 调用失败: {e}")
         return {"status": "error", "error": str(e), "suggestion": None, "confidence": 0}
@@ -76,12 +109,14 @@ def sales_forecast(product_name: str, history_sales: list[dict]) -> dict:
     """AI 销售预测"""
     system_prompt = """你是供应链销售预测专家。根据历史销售数据预测未来需求。
 请返回 JSON 格式：{
-  "forecast_next_30d": 预测数量,
+  "forecast_next_30d": 预测总量,
+  "predictions": [day1_value, day2_value, ..., day30_value],
   "trend": "上升/下降/平稳",
   "seasonal_factor": "季节性因素说明",
   "suggestion": "采购/库存建议",
   "confidence": 0.0-1.0
-}"""
+}
+其中 predictions 是一个包含30个数值的数组，表示未来30天每天的预测销量。"""
     user_prompt = json.dumps({
         "product": product_name,
         "sales_history": history_sales,

@@ -98,6 +98,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { marked } from 'marked'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -135,26 +136,7 @@ const router = useRouter()
 
 const renderedContent = computed(() => {
   if (!props.content) return ''
-  let html = props.content
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  // Bold: **text**
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  // Headings: ### text / ## text
-  html = html.replace(/^### (.+)$/gm, '<h4>$1</h4>')
-  html = html.replace(/^## (.+)$/gm, '<h3>$1</h3>')
-  // List items: - text (wrap consecutive items in <ul>)
-  html = html.replace(/^- (.+)$/gm, '<li>$1</li>')
-  html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>')
-  // Inline code: `code`
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>')
-  // Line breaks
-  html = html.replace(/\n{2,}/g, '</p><p>')
-  html = html.replace(/\n/g, '<br/>')
-  // Wrap in paragraphs
-  if (!html.startsWith('<h') && !html.startsWith('<ul') && !html.startsWith('<p')) {
-    html = '<p>' + html + '</p>'
-  }
-  return html
+  return marked(props.content, { breaks: true })
 })
 
 function chartWithDefaultTitle(block: MessageBlock) {
@@ -200,8 +182,8 @@ function formatCellValue(key: string, value: any): string {
     return '¥' + value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
   // Percent fields
-  const percentKeys = ['rate', 'percent', 'ratio', 'score']
-  if (typeof value === 'number' && (key.toLowerCase().includes('rate') || key.toLowerCase().includes('rate'))) {
+  const percentKeys = ['rate', 'percent', 'ratio']
+  if (typeof value === 'number' && percentKeys.some(k => key.toLowerCase().includes(k))) {
     return value + '%'
   }
   // Numeric fields
@@ -247,8 +229,36 @@ function hasValidChartData(block: MessageBlock): boolean {
 .chat-message.user .msg-bubble { background: var(--color-info-bg); border: 1px solid var(--color-info-light); }
 .chat-message.assistant .msg-bubble { background: var(--bg-page); border: 1px solid var(--border-color); }
 
+.msg-content h3 { margin: 14px 0 8px; font-size: 16px; }
 .msg-content h4 { margin: 12px 0 6px; font-size: 15px; }
-.msg-content li { margin-left: 16px; }
+.msg-content ul, .msg-content ol { margin: 6px 0; padding-left: 24px; }
+.msg-content li { margin: 2px 0; }
+.msg-content p { margin: 4px 0; }
+.msg-content a { color: var(--color-primary); text-decoration: underline; }
+.msg-content code {
+  background: rgba(0, 0, 0, 0.06); padding: 2px 6px; border-radius: 4px;
+  font-size: 13px; font-family: 'Menlo', 'Consolas', monospace;
+}
+.msg-content pre {
+  background: rgba(0, 0, 0, 0.06); padding: 12px; border-radius: 8px;
+  overflow-x: auto; margin: 8px 0;
+}
+.msg-content pre code {
+  background: none; padding: 0; font-size: 13px; line-height: 1.5;
+}
+.msg-content table {
+  border-collapse: collapse; margin: 8px 0; width: 100%; font-size: 13px;
+}
+.msg-content table th, .msg-content table td {
+  border: 1px solid var(--border-color); padding: 6px 10px; text-align: left;
+}
+.msg-content table th {
+  background: var(--table-header-bg); font-weight: 600;
+}
+.msg-content blockquote {
+  border-left: 4px solid var(--color-primary); margin: 8px 0;
+  padding: 4px 12px; color: var(--text-secondary);
+}
 
 .chart-container { margin: 12px 0; background: var(--bg-card); border-radius: 8px; padding: 8px; }
 .block-table {
