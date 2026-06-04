@@ -25,15 +25,13 @@ SYSTEM_PROMPT = """你是供应链ERP系统的AI决策助手。你的核心能�
 2. 在回复的 blocks 中用图表/表格展示数据
 3. 再用文字分析
 
-## 工具说明
-query_inventory / analyze_stock_risk — 库存相关
-query_sales_history / forecast_sales — 销售相关（销售预测要两个都调，合并成双线图）
-query_suppliers / rank_suppliers — 供应商相关
-query_products — 产品查询
-render_inventory_heatmap / render_sales_trend / render_supplier_ranking — 专属图表（复杂可视化）
-render_comprehensive_diagnosis — 供应链综合诊断（健康评分雷达图+仪表盘+总结表格），当用户问"综合诊断"/"供应链状况"时调用
-render_purchase_advice — 采购建议（补货柱状图+推荐供应商表格+费用估算），当用户问"采购建议"/"补货推荐"时调用
-recommend_restock / recommend_supplier — 多维度推荐
+## 工具说明（重要：不要同时调用查询工具和同名渲染工具，避免重复图表）
+库存：调用 render_inventory_heatmap（含图表+表格），或 query_inventory（需要自己画图时）— 不要两个都调
+销售：调用 render_sales_trend（含图表+预测），或 query_sales_history + forecast_sales（需要自己画图时）
+供应商：调用 render_supplier_ranking（含图表+排名），或 query_suppliers / rank_suppliers — 不要重复
+综合诊断：只调 render_comprehensive_diagnosis
+采购建议：只调 render_purchase_advice 或 recommend_restock
+推荐：recommend_restock / recommend_supplier — 多维度推荐
 
 库存分析规则：当返回库存相关 blocks（图表或表格）时，必须在 content 中包含文字分析：
 1. 列出需补货的产品及建议补货量
@@ -43,7 +41,8 @@ recommend_restock / recommend_supplier — 多维度推荐
 
 ## 回复格式（必须返回JSON）
 {"content": "markdown文字", "blocks": [可视化块]}
-- 时间序列→折线图, 对比数据→柱状图, 关系数据→热力图, 列表→表格
+- content 中只放文字分析，不要放入任何 JSON 或代码
+- 所有图表/表格数据只能放在 blocks 数组中
 
 ## 关键：无法获取数据时的处理
 如果调工具失败或数据为空，在 content 中明确告知用户原因，blocks 保持空数组。不要编造数据。
@@ -417,6 +416,23 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
             full_messages.append(assistant_msg)
 
             direct_blocks: list = []
+            # Deduplicate: if render_X is called, skip auto-chart for query_X
+            called_render_tools = set()
+            for tc in msg.tool_calls:
+                if tc.function.name.startswith("render_"):
+                    called_render_tools.add(tc.function.name)
+            # Map render tools to their overlapping query tools
+            render_to_query = {
+                "render_inventory_heatmap": {"query_inventory", "analyze_stock_risk"},
+                "render_sales_trend": {"query_sales_history", "forecast_sales"},
+                "render_supplier_ranking": {"query_suppliers", "rank_suppliers"},
+                "render_comprehensive_diagnosis": {"query_inventory", "analyze_stock_risk"},
+                "render_purchase_advice": {"recommend_restock", "query_inventory"},
+            }
+            skip_auto_chart_for = set()
+            for render_name in called_render_tools:
+                skip_auto_chart_for |= render_to_query.get(render_name, set())
+
             for tc in msg.tool_calls:
                 try:
                     args = json.loads(tc.function.arguments)
@@ -459,10 +475,11 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                         "tool_call_id": tc.id,
                         "content": json.dumps(result, ensure_ascii=False, default=str)
                     })
-                    # Auto-generate chart from structured tool result data
-                    chart = _auto_chart_from_result(tc.function.name, result)
-                    if chart:
-                        direct_blocks.append(chart)
+                    # Auto-generate chart ONLY if no overlapping render tool was called
+                    if tc.function.name not in skip_auto_chart_for:
+                        chart = _auto_chart_from_result(tc.function.name, result)
+                        if chart:
+                            direct_blocks.append(chart)
 
             # ═══ 日志②：工具执行完毕，准备第二次调 AI ═══
             logger.info(f"[Chat] 工具执行完毕, full_messages共{len(full_messages)}条, direct_blocks={len(direct_blocks)}个")
@@ -501,9 +518,9 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                         f"前200字: >>>{(raw_content or '')[:200]}<<<")
 
             parsed = _parse_response(raw_content)
-            # Merge direct blocks (charts) at front of response
-            if direct_blocks:
-                parsed["blocks"] = direct_blocks + parsed.get("blocks", [])
+            # Merge direct blocks (charts) at front of response, then dedup
+            all_blocks = direct_blocks + parsed.get("blocks", [])
+            parsed["blocks"] = _dedup_chart_blocks(all_blocks)
             return parsed
 
         # LLM 没调工具：如果是数据类问题，强制重试一次
@@ -582,8 +599,8 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                     extra_body={"thinking": {"type": "disabled"}},
                 )
                 parsed = _parse_response(resp2.choices[0].message.content)
-                if direct_blocks:
-                    parsed["blocks"] = direct_blocks + parsed.get("blocks", [])
+                all_blocks = direct_blocks + parsed.get("blocks", [])
+                parsed["blocks"] = _dedup_chart_blocks(all_blocks)
                 return parsed
 
             else:
@@ -598,6 +615,27 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
     except Exception as e:
         logger.error(f"[Chat] 异常: {e}", exc_info=True)
         return {"content": f"处理请求时出错，请重试。错误信息：{str(e)}", "blocks": []}
+
+
+def _dedup_chart_blocks(blocks: list) -> list:
+    """去除重复的 chart block（相同 title 的图表只保留第一个）"""
+    seen_titles = set()
+    result = []
+    for b in blocks:
+        if b.get("type") == "chart":
+            data = b.get("data", {})
+            title = ""
+            if isinstance(data, dict):
+                t = data.get("title")
+                if isinstance(t, dict):
+                    title = t.get("text", "")
+                elif isinstance(t, str):
+                    title = t
+            if title and title in seen_titles:
+                continue
+            seen_titles.add(title)
+        result.append(b)
+    return result
 
 
 def _parse_response(raw: str | None) -> dict:
