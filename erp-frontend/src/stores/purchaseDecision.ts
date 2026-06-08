@@ -158,7 +158,9 @@ export const usePurchaseDecisionStore = defineStore('purchaseDecision', () => {
 
   function removeProduct(productId: number) {
     allProducts.value = allProducts.value.filter(p => p.product_id !== productId)
-    selectedIds.value.delete(productId)
+    const newSet = new Set(selectedIds.value)
+    newSet.delete(productId)
+    selectedIds.value = newSet
     delete quantities.value[productId]
   }
 

@@ -95,11 +95,31 @@ const loadHeatmap = async () => {
   } finally { loading.value = false }
 }
 
-const runAIAnalysis = () => {
+const runAIAnalysis = async () => {
   if (heatmapData.value.length === 0) return
-  const critical = heatmapData.value.filter((d: any) => d.alert_level >= 0.6)
-  const warning = heatmapData.value.filter((d: any) => d.alert_level >= 0.3 && d.alert_level < 0.6)
-  aiResult.value = { suggestion: `共监控 ${heatmapData.value.length} 项库存: ${critical.length} 项严重, ${warning.length} 项预警, ${heatmapData.value.length - critical.length - warning.length} 项正常。`, confidence: 0.85 }
+  try {
+    const productIds = [...new Set(heatmapData.value.map((d: any) => d.product_id))]
+    const res: any = await aiApi.stockAlertBatch({ product_ids: productIds })
+    if (res && res.results) {
+      const critical = res.results.filter((r: any) => r.risk_level === 'critical')
+      const warning = res.results.filter((r: any) => r.risk_level === 'warning')
+      const normal = res.results.filter((r: any) => r.risk_level === 'normal' || r.risk_level === 'unknown')
+      const suggestions = res.results
+        .filter((r: any) => r.suggestion)
+        .map((r: any) => `• **${r.product_name}**: ${r.suggestion}`)
+        .slice(0, 10)
+        .join('\n')
+      aiResult.value = {
+        suggestion: `共分析 ${res.results.length} 项产品库存:\n- ${critical.length} 项严重告警\n- ${warning.length} 项预警\n- ${normal.length} 项正常\n\n${suggestions}`,
+        confidence: 0.8,
+      }
+    }
+  } catch {
+    // Fallback to local analysis
+    const critical = heatmapData.value.filter((d: any) => d.alert_level >= 0.6)
+    const warning = heatmapData.value.filter((d: any) => d.alert_level >= 0.3 && d.alert_level < 0.6)
+    aiResult.value = { suggestion: `共监控 ${heatmapData.value.length} 项库存: ${critical.length} 项严重, ${warning.length} 项预警, ${heatmapData.value.length - critical.length - warning.length} 项正常。`, confidence: 0.85 }
+  }
 }
 
 watch(heatmapData, () => runAIAnalysis())

@@ -127,7 +127,8 @@ def _build_low_stock_table(db: Session) -> list[dict]:
         sales_30d = (
             db.query(func.sum(SaleOrderItem.quantity))
             .join(SaleOrder, SaleOrder.id == SaleOrderItem.order_id)
-            .filter(SaleOrderItem.product_id == prod.id, SaleOrder.order_date >= thirty_days_ago)
+            .filter(SaleOrderItem.product_id == prod.id, SaleOrder.order_date >= thirty_days_ago,
+                    SaleOrder.status != "cancelled")
             .scalar()
         ) or 0
         status = "缺货" if inv.quantity == 0 else "严重不足" if inv.quantity < prod.min_stock * 0.5 else "偏低"
@@ -157,7 +158,7 @@ def _render_inventory_heatmap(db: Session) -> dict:
         )
         .join(Inventory, Inventory.product_id == Product.id)
         .join(Warehouse, Inventory.warehouse_id == Warehouse.id)
-        .filter(Inventory.quantity >= 0, Product.is_active == True)
+        .filter(Inventory.quantity >= 0, Product.is_active == True, Warehouse.is_active == True)
         .order_by(Inventory.quantity)
         .limit(200)
         .all()
@@ -173,7 +174,7 @@ def _render_inventory_heatmap(db: Session) -> dict:
         })
         return {"_render": True, "blocks": blocks}
 
-    # Build warehouse × product matrix
+    # Build warehouse × product matrix (≤60 rows for chart readability)
     wh_names = sorted(set(r.warehouse_name for r in rows))
     prod_names = []
     seen = set()
@@ -190,18 +191,45 @@ def _render_inventory_heatmap(db: Session) -> dict:
         wi = wh_idx.get(r.warehouse_name, 0)
         pi = prod_idx.get(r.product_name, 0)
         ratio = r.quantity / r.min_stock if r.min_stock > 0 else 1.0
-        level = min(max(1.0 - ratio / 2.0, 0), 1) if ratio < 1 else max(1.0 - ratio / 4.0, 0)
         if r.quantity == 0:
             level = 1.0
+        elif ratio <= 1:
+            level = min(max(1.0 - ratio / 2.0, 0), 1)
+        else:
+            level = max(0.5 - (ratio - 1) / 6.0, 0)
         heatmap_data.append([wi, pi, round(level, 2)])
 
-    # Chart block
+    # If too many product×warehouse combinations, skip heatmap, use table only
+    if len(rows) > 60:
+        table_rows = _build_low_stock_table(db)
+        if table_rows:
+            blocks.append({
+                "type": "table",
+                "columns": [
+                    {"key": "产品", "title": "产品"},
+                    {"key": "仓库", "title": "仓库"},
+                    {"key": "当前库存", "title": "当前库存"},
+                    {"key": "安全库存", "title": "安全库存"},
+                    {"key": "近30天销量", "title": "近30天销量"},
+                    {"key": "建议补货量", "title": "建议补货量"},
+                    {"key": "状态", "title": "状态"},
+                ],
+                "rows": table_rows,
+            })
+        blocks.append({
+            "type": "table",
+            "columns": [{"key": "msg", "title": "提示"}],
+            "rows": [{"msg": f"库存数据量较大（{len(rows)}条记录），已自动切换为表格展示。可使用筛选条件缩小范围，或查看下方低库存产品列表。"}],
+        })
+        return {"_render": True, "blocks": blocks}
+
+    # Chart block (≤60 rows)
     blocks.append({
         "type": "chart",
         "chartType": "heatmap",
         "data": {
             "title": {"text": "库存状态热力图", "left": "center", "textStyle": {"fontSize": 14, "fontWeight": "bold"}},
-            "tooltip": {"position": "top", "formatter": "{b}<br/>状态等级: {c}"},
+            "tooltip": {"position": "top", "formatter": "仓库: {b}<br/>风险等级: {c}"},
             "grid": {"left": 160, "right": 60, "top": 50, "bottom": 60},
             "xAxis": {"type": "category", "data": wh_names, "splitArea": {"show": True}, "axisLabel": {"fontSize": 11}},
             "yAxis": {"type": "category", "data": prod_names, "splitArea": {"show": True}, "axisLabel": {"fontSize": 11}},
@@ -279,7 +307,7 @@ def _render_sales_trend(db: Session) -> dict:
         last_month = months[-1]
         forecast_months = _next_months(last_month, 3)
     else:
-        forecast_vals = amounts[-3:] if amounts else [0, 0, 0]
+        forecast_vals = amounts[-3:] if len(amounts) >= 3 else [0, 0, 0]
         forecast_months = _next_months(months[-1] if months else "2026-01", 3)
 
     return {
@@ -372,12 +400,11 @@ def _next_months(last_month: str, count: int) -> list[str]:
 # ── 3. Supplier Ranking ───────────────────────────────────────────────
 
 def _render_supplier_ranking(db: Session) -> dict:
-    """返回供应商排名柱状图 chart block"""
+    """返回供应商排名图表（按数据量自适应：垂直柱/横向柱+dataZoom/Top15图表+表格）"""
     suppliers = (
         db.query(Supplier)
         .filter(Supplier.status == "active")
         .order_by(Supplier.rating.desc())
-        .limit(20)
         .all()
     )
 
@@ -389,7 +416,7 @@ def _render_supplier_ranking(db: Session) -> dict:
             "_render": True,
         }
 
-    names = [s.name for s in suppliers]
+    n = len(suppliers)
     metrics_def = [
         ("quality_score", "质量评分", "#5470c6"),
         ("delivery_score", "交付评分", "#91cc75"),
@@ -398,31 +425,83 @@ def _render_supplier_ranking(db: Session) -> dict:
         ("total_score", "综合评分", "#73c0de"),
     ]
 
-    # Fetch average evaluation scores per supplier
-    data_by_supplier = {}
-    for s in suppliers:
-        evals = (
-            db.query(
-                func.avg(SupplierEvaluation.quality_score).label("q"),
-                func.avg(SupplierEvaluation.delivery_score).label("d"),
-                func.avg(SupplierEvaluation.price_score).label("p"),
-                func.avg(SupplierEvaluation.service_score).label("s"),
-                func.avg(SupplierEvaluation.total_score).label("total_label"),
-            )
-            .filter(SupplierEvaluation.supplier_id == s.id)
-            .first()
+    # Batch fetch evaluation scores (Bug 4 fix: single query instead of N+1)
+    supplier_ids = [s.id for s in suppliers]
+    eval_rows = (
+        db.query(
+            SupplierEvaluation.supplier_id,
+            func.avg(SupplierEvaluation.quality_score).label("q"),
+            func.avg(SupplierEvaluation.delivery_score).label("d"),
+            func.avg(SupplierEvaluation.price_score).label("p"),
+            func.avg(SupplierEvaluation.service_score).label("s"),
+            func.avg(SupplierEvaluation.total_score).label("total_label"),
         )
-        data_by_supplier[s.id] = {
-            "quality_score": round(float(evals.q or 0), 1),
-            "delivery_score": round(float(evals.d or 0), 1),
-            "price_score": round(float(evals.p or 0), 1),
-            "service_score": round(float(evals.s or 0), 1),
-            "total_score": round(float(evals.total_label or 0), 1),
+        .filter(SupplierEvaluation.supplier_id.in_(supplier_ids))
+        .group_by(SupplierEvaluation.supplier_id)
+        .all()
+    )
+    eval_map = {}
+    for row in eval_rows:
+        eval_map[row.supplier_id] = {
+            "quality_score": round(float(row.q or 0), 1),
+            "delivery_score": round(float(row.d or 0), 1),
+            "price_score": round(float(row.p or 0), 1),
+            "service_score": round(float(row.s or 0), 1),
+            "total_score": round(float(row.total_label or 0), 1),
         }
+
+    def _build_score(sid: int, key: str) -> float:
+        return eval_map.get(sid, {}).get(key, 0)
+
+    blocks = []
+
+    if n <= 15:
+        # Tier 1: Vertical bar chart
+        chart_suppliers = suppliers
+        chart_title = "供应商评分对比"
+        use_horizontal = False
+    elif n <= 50:
+        # Tier 2: Horizontal bar chart + dataZoom
+        chart_suppliers = suppliers
+        chart_title = "供应商评分对比"
+        use_horizontal = True
+    else:
+        # Tier 3: Top 15 chart + full ranking table
+        chart_suppliers = suppliers[:15]
+        chart_title = "供应商评分对比（Top 15）"
+        use_horizontal = True
+
+        # Build full ranking table
+        rank_rows = []
+        for rank, s in enumerate(suppliers, 1):
+            rank_rows.append({
+                "排名": rank,
+                "供应商": s.name,
+                "综合评分": _build_score(s.id, "total_score"),
+                "质量评分": _build_score(s.id, "quality_score"),
+                "交付评分": _build_score(s.id, "delivery_score"),
+                "价格评分": _build_score(s.id, "price_score"),
+                "服务评分": _build_score(s.id, "service_score"),
+            })
+        blocks.append({
+            "type": "table",
+            "columns": [
+                {"key": "排名", "title": "排名"},
+                {"key": "供应商", "title": "供应商"},
+                {"key": "综合评分", "title": "综合评分"},
+                {"key": "质量评分", "title": "质量评分"},
+                {"key": "交付评分", "title": "交付评分"},
+                {"key": "价格评分", "title": "价格评分"},
+                {"key": "服务评分", "title": "服务评分"},
+            ],
+            "rows": rank_rows,
+        })
+
+    names = [s.name for s in chart_suppliers]
 
     series_list = []
     for key, label, color in metrics_def:
-        values = [data_by_supplier.get(s.id, {}).get(key, 0) for s in suppliers]
+        values = [_build_score(s.id, key) for s in chart_suppliers]
         series_list.append({
             "name": label,
             "type": "bar",
@@ -431,12 +510,47 @@ def _render_supplier_ranking(db: Session) -> dict:
             "barMaxWidth": 16,
         })
 
-    return {
-        "type": "chart",
-        "chartType": "bar",
-        "data": {
+    if use_horizontal:
+        # Horizontal bar chart: yAxis=names, xAxis=values
+        option = {
             "title": {
-                "text": "供应商评分对比",
+                "text": chart_title,
+                "left": "center",
+                "textStyle": {"fontSize": 14, "fontWeight": "bold"},
+            },
+            "tooltip": {"trigger": "axis"},
+            "legend": {
+                "data": [m[1] for m in metrics_def],
+                "bottom": 0,
+                "type": "scroll",
+            },
+            "toolbox": {
+                "feature": {
+                    "saveAsImage": {},
+                    "dataView": {"readOnly": False},
+                    "restore": {},
+                }
+            },
+            "grid": {"left": 140, "right": 80, "top": 50, "bottom": 80},
+            "xAxis": {"type": "value", "min": 0, "name": "评分", "nameTextStyle": {"fontSize": 12}},
+            "yAxis": {
+                "type": "category",
+                "data": names,
+                "inverse": True,
+                "axisLabel": {"fontSize": 11},
+            },
+            "dataZoom": [
+                {"type": "inside", "yAxisIndex": 0, "start": 0, "end": min(100, 15 / n * 100)},
+                {"type": "slider", "yAxisIndex": 0, "start": 0, "end": min(100, 15 / n * 100),
+                 "orient": "vertical", "right": 10, "width": 20},
+            ],
+            "series": series_list,
+        }
+    else:
+        # Vertical bar chart (original style)
+        option = {
+            "title": {
+                "text": chart_title,
                 "left": "center",
                 "textStyle": {"fontSize": 14, "fontWeight": "bold"},
             },
@@ -461,9 +575,15 @@ def _render_supplier_ranking(db: Session) -> dict:
             },
             "yAxis": {"type": "value", "min": 0, "name": "评分", "nameTextStyle": {"fontSize": 12}},
             "series": series_list,
-        },
-        "_render": True,
-    }
+        }
+
+    blocks.insert(0, {
+        "type": "chart",
+        "chartType": "bar",
+        "data": option,
+    })
+
+    return {"_render": True, "blocks": blocks}
 
 
 # ── 4. Recommend Restock ──────────────────────────────────────────────
@@ -537,22 +657,34 @@ def _recommend_supplier(args: dict, db: Session) -> dict:
     if not product:
         return {"error": f"产品 #{product_id} 不存在"}
 
-    # Get all active suppliers with evaluations and order stats
+    # Get all active suppliers with evaluations (batch query) and order stats
     suppliers = db.query(Supplier).filter(Supplier.status == "active").all()
+    supplier_ids = [s.id for s in suppliers]
+    eval_rows = (
+        db.query(
+            SupplierEvaluation.supplier_id,
+            func.avg(SupplierEvaluation.quality_score).label("q"),
+            func.avg(SupplierEvaluation.delivery_score).label("d"),
+            func.avg(SupplierEvaluation.price_score).label("p"),
+            func.avg(SupplierEvaluation.service_score).label("s"),
+            func.avg(SupplierEvaluation.total_score).label("total_label"),
+        )
+        .filter(SupplierEvaluation.supplier_id.in_(supplier_ids))
+        .group_by(SupplierEvaluation.supplier_id)
+        .all()
+    )
+    eval_map = {}
+    for row in eval_rows:
+        eval_map[row.supplier_id] = {
+            "quality_score": round(float(row.q or 0), 1),
+            "delivery_score": round(float(row.d or 0), 1),
+            "price_score": round(float(row.p or 0), 1),
+            "service_score": round(float(row.s or 0), 1),
+            "total_score": round(float(row.total_label or 0), 1),
+        }
+
     results = []
     for s in suppliers:
-        evals = (
-            db.query(
-                func.avg(SupplierEvaluation.quality_score).label("q"),
-                func.avg(SupplierEvaluation.delivery_score).label("d"),
-                func.avg(SupplierEvaluation.price_score).label("p"),
-                func.avg(SupplierEvaluation.service_score).label("s"),
-                func.avg(SupplierEvaluation.total_score).label("total_label"),
-            )
-            .filter(SupplierEvaluation.supplier_id == s.id)
-            .first()
-        )
-
         # Order history for this product from this supplier
         from app.models.purchase import PurchaseOrderItem, PurchaseOrder as PO
         po_count = (
@@ -562,16 +694,17 @@ def _recommend_supplier(args: dict, db: Session) -> dict:
             .scalar()
         )
 
+        scores = eval_map.get(s.id, {})
         results.append({
             "supplier_id": s.id,
             "supplier_name": s.name,
             "rating": float(s.rating),
             "delivery_lead_time": s.delivery_lead_time,
-            "quality_score": round(float(evals.q or 0), 1),
-            "delivery_score": round(float(evals.d or 0), 1),
-            "price_score": round(float(evals.p or 0), 1),
-            "service_score": round(float(evals.s or 0), 1),
-            "total_score": round(float(evals.total_label or 0), 1),
+            "quality_score": scores.get("quality_score", 0),
+            "delivery_score": scores.get("delivery_score", 0),
+            "price_score": scores.get("price_score", 0),
+            "service_score": scores.get("service_score", 0),
+            "total_score": scores.get("total_score", 0),
             "past_orders": int(po_count or 0),
         })
 
@@ -634,8 +767,19 @@ def _render_comprehensive_diagnosis(db: Session) -> dict:
     )
     supplier_score = round(float(avg_supplier or 0), 1)
 
-    # --- Dimension 4: Stockout risk ---
-    stockout_risk_score = round(100 - stockout_rate * 100, 1) if total_items > 0 else 100.0
+    # --- Dimension 4: Stockout risk (weighted: critical items penalized 3×) ---
+    if total_items > 0:
+        critical_items = (
+            db.query(Inventory)
+            .join(Product, Inventory.product_id == Product.id)
+            .filter(Inventory.quantity < Product.min_stock * 0.5, Inventory.quantity >= 0)
+            .count()
+        )
+        below_min_not_critical = max(0, out_of_stock_items - critical_items)
+        risk_adjusted = (critical_items * 3 + below_min_not_critical) / total_items
+        stockout_risk_score = round(max(0, 100 * (1 - risk_adjusted)), 1)
+    else:
+        stockout_risk_score = 100.0
 
     # --- Dimension 5: Turnover rate ---
     # Estimate from sales / inventory ratio over last 30 days

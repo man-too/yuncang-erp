@@ -91,13 +91,13 @@ def build_welcome_context(db: Session) -> dict:
         db.query(Product.name, Inventory.quantity, Product.min_stock, Product.unit,
                  Warehouse.name.label("wname"))
         .join(Inventory, Inventory.product_id == Product.id)
-        .join(Warehouse, Inventory.warehouse_id == Warehouse.id)
+        .outerjoin(Warehouse, Inventory.warehouse_id == Warehouse.id)
         .filter(Inventory.quantity <= Product.min_stock, Inventory.quantity >= 0)
         .order_by(Inventory.quantity)
         .limit(10).all()
     )
     low_stock = [
-        {"name": r[0], "qty": float(r[1]), "min": float(r[2]), "unit": r[3], "warehouse": r[4]}
+        {"name": r[0], "qty": float(r[1]), "min": float(r[2]), "unit": r[3], "warehouse": r[4] or "未知仓库"}
         for r in low_rows
     ]
 
@@ -137,8 +137,8 @@ def build_welcome_context(db: Session) -> dict:
         for s in top
     ]
 
-    # Hot selling products (last 30 days)
-    thirty_days_ago = date.today() - timedelta(days=30)
+    # Hot selling products (last 90 days — broader window for demo data)
+    ninety_days_ago = date.today() - timedelta(days=90)
     hot = (
         db.query(
             Product.name,
@@ -147,7 +147,7 @@ def build_welcome_context(db: Session) -> dict:
         )
         .join(SaleOrderItem, SaleOrderItem.product_id == Product.id)
         .join(SaleOrder, SaleOrder.id == SaleOrderItem.order_id)
-        .filter(SaleOrder.order_date >= thirty_days_ago)
+        .filter(SaleOrder.order_date >= ninety_days_ago)
         .group_by(Product.id, Product.name)
         .order_by(func.sum(SaleOrderItem.quantity).desc())
         .limit(5).all()
@@ -199,7 +199,7 @@ def build_welcome_message(context: dict) -> dict:
         parts.append("### 🏆 优质供应商 TOP3：" + "、".join(s["name"] for s in top_sup[:3]) + "\n")
 
     # 热销产品 - 放在文字最后，紧挨表格
-    parts.append("### 📈 近期热销产品 TOP5（近30天）")
+    parts.append("### 📈 近期热销产品 TOP5（近90天）")
     hot_rows = [
         {"rank": i + 1, "name": h["name"], "qty": f"{h['qty']:.0f}", "amount": f"¥{h['amount']:,.0f}"}
         for i, h in enumerate(hot[:5])
@@ -397,8 +397,9 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
         else:
             logger.info(f"[Chat] AI 直接回答（未调工具）, content长度={len(msg.content or '')}")
 
-        if msg.tool_calls:
-            assistant_msg: dict = {
+        def _execute_tool_calls(full_messages, msg, db, creator_id):
+            """执行工具调用并返回 (更新后的full_messages, direct_blocks)"""
+            assistant_msg = {
                 "role": "assistant",
                 "content": msg.content or "",
                 "tool_calls": [
@@ -410,18 +411,16 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                     for tc in msg.tool_calls
                 ]
             }
-            # DeepSeek thinking models require reasoning_content to be passed back
             if hasattr(msg, 'reasoning_content') and msg.reasoning_content:
                 assistant_msg["reasoning_content"] = msg.reasoning_content
             full_messages.append(assistant_msg)
 
-            direct_blocks: list = []
-            # Deduplicate: if render_X is called, skip auto-chart for query_X
+            direct_blocks = []
             called_render_tools = set()
             for tc in msg.tool_calls:
                 if tc.function.name.startswith("render_"):
                     called_render_tools.add(tc.function.name)
-            # Map render tools to their overlapping query tools
+
             render_to_query = {
                 "render_inventory_heatmap": {"query_inventory", "analyze_stock_risk"},
                 "render_sales_trend": {"query_sales_history", "forecast_sales"},
@@ -438,7 +437,6 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                     args = json.loads(tc.function.arguments)
                 except json.JSONDecodeError:
                     args = {}
-                # Action tools must not execute here — return action block instead
                 if tc.function.name in ("create_purchase_order", "create_stock_transfer"):
                     full_messages.append({
                         "role": "tool",
@@ -453,14 +451,11 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                     "render_supplier_ranking",
                     "render_comprehensive_diagnosis", "render_purchase_advice",
                 ):
-                    # Chart tools: execute, collect direct-render blocks, also feed to LLM
                     result = execute_tool(tc.function.name, args, db)
                     if isinstance(result, dict) and result.get("_render"):
                         if "blocks" in result:
-                            # Multi-block format
                             direct_blocks.extend(result["blocks"])
                         else:
-                            # Single block fallback
                             direct_blocks.append(result)
                     full_messages.append({
                         "role": "tool",
@@ -475,11 +470,15 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                         "tool_call_id": tc.id,
                         "content": json.dumps(result, ensure_ascii=False, default=str)
                     })
-                    # Auto-generate chart ONLY if no overlapping render tool was called
                     if tc.function.name not in skip_auto_chart_for:
                         chart = _auto_chart_from_result(tc.function.name, result)
                         if chart:
                             direct_blocks.append(chart)
+
+            return full_messages, direct_blocks
+
+        if msg.tool_calls:
+            full_messages, direct_blocks = _execute_tool_calls(full_messages, msg, db, creator_id)
 
             # ═══ 日志②：工具执行完毕，准备第二次调 AI ═══
             logger.info(f"[Chat] 工具执行完毕, full_messages共{len(full_messages)}条, direct_blocks={len(direct_blocks)}个")
@@ -543,61 +542,25 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
             if retry_msg.tool_calls:
                 # Replace msg with retry result
                 msg = retry_msg
-                # Re-construct assistant_msg and continue to tool processing
-                assistant_msg = {
-                    "role": "assistant",
-                    "content": msg.content or "",
-                    "tool_calls": [
-                        {"id": tc.id, "type": "function",
-                         "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-                        for tc in msg.tool_calls
-                    ],
-                }
-                if hasattr(msg, 'reasoning_content') and msg.reasoning_content:
-                    assistant_msg["reasoning_content"] = msg.reasoning_content
-                full_messages.append(assistant_msg)
+                full_messages, direct_blocks = _execute_tool_calls(full_messages, msg, db, creator_id)
 
-                direct_blocks = []
-                for tc in msg.tool_calls:
-                    try:
-                        args = json.loads(tc.function.arguments)
-                    except json.JSONDecodeError:
-                        args = {}
-                    if tc.function.name in ("create_purchase_order", "create_stock_transfer"):
-                        full_messages.append({
-                            "role": "tool", "tool_call_id": tc.id,
-                            "content": json.dumps({"blocked": True, "message": "需用户确认"}, ensure_ascii=False)
-                        })
-                    elif tc.function.name in ("render_inventory_heatmap", "render_sales_trend", "render_supplier_ranking", "render_comprehensive_diagnosis", "render_purchase_advice"):
-                        result = execute_tool(tc.function.name, args, db)
-                        if isinstance(result, dict) and result.get("_render"):
-                            if "blocks" in result:
-                                direct_blocks.extend(result["blocks"])
-                            else:
-                                direct_blocks.append(result)
-                        full_messages.append({
-                            "role": "tool", "tool_call_id": tc.id,
-                            "content": json.dumps(result, ensure_ascii=False, default=str)
-                        })
-                    else:
-                        args.setdefault("creator_id", creator_id)
-                        result = execute_tool(tc.function.name, args, db)
-                        full_messages.append({
-                            "role": "tool", "tool_call_id": tc.id,
-                            "content": json.dumps(result, ensure_ascii=False, default=str)
-                        })
-                        chart = _auto_chart_from_result(tc.function.name, result)
-                        if chart:
-                            direct_blocks.append(chart)
-
-                resp2 = client.chat.completions.create(
-                    model=settings.OPENAI_MODEL,
-                    messages=full_messages,
-                    temperature=0.3,
-                    max_tokens=4096,
-                    response_format={"type": "json_object"},
-                    extra_body={"thinking": {"type": "disabled"}},
-                )
+                try:
+                    resp2 = client.chat.completions.create(
+                        model=settings.OPENAI_MODEL,
+                        messages=full_messages,
+                        temperature=0.3,
+                        max_tokens=4096,
+                        response_format={"type": "json_object"},
+                        extra_body={"thinking": {"type": "disabled"}},
+                    )
+                except Exception:
+                    resp2 = client.chat.completions.create(
+                        model=settings.OPENAI_MODEL,
+                        messages=full_messages,
+                        temperature=0.3,
+                        max_tokens=4096,
+                        extra_body={"thinking": {"type": "disabled"}},
+                    )
                 parsed = _parse_response(resp2.choices[0].message.content)
                 all_blocks = direct_blocks + parsed.get("blocks", [])
                 parsed["blocks"] = _dedup_chart_blocks(all_blocks)
@@ -694,13 +657,13 @@ def _parse_response(raw: str | None) -> dict:
                     })
                     # Remove the JSON fragment from content
                     content = content[:start] + content[end:]
-                    # Clean up extra whitespace/newlines
-                    content = re.sub(r'\s{2,}', ' ', content).strip()
                     continue
             except json.JSONDecodeError:
                 pass
-            # If we got here, the match didn't produce a valid chart JSON; skip it
-            break
+            # If we got here, the match didn't produce a valid chart JSON; skip past it
+            matched_text = match.group(0)
+            content = content[:start] + content[start + len(matched_text):]
+            continue
 
         # If content is empty or only whitespace after extraction, set default message
         if not content.strip():

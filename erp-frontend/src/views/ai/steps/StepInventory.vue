@@ -294,7 +294,9 @@ async function loadAIRecommendation() {
               p => p.product_name === productName || p.product_id === row.product_id
             )
             if (product) {
-              store.selectedIds.value.add(product.product_id)
+              const newSet = new Set(store.selectedIds.value)
+              newSet.add(product.product_id)
+              store.selectedIds.value = newSet
               store.quantities.value[product.product_id] =
                 row.quantity || row.suggested_qty || Math.max(0, product.min_stock - product.current_qty)
             }

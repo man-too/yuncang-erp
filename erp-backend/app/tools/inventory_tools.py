@@ -1,7 +1,9 @@
 """库存查询与风险分析工具"""
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from app.models.inventory import Inventory, Warehouse
 from app.models.product import Product
+from app.models.sale import SaleOrderItem, SaleOrder
 
 
 def _warehouse_name(db: Session, wid: int) -> str:
@@ -56,7 +58,7 @@ def execute(name: str, args: dict, db: Session) -> dict | None:
 
 
 def _query_inventory(args: dict, db: Session) -> dict:
-    q = db.query(Inventory, Product).join(Product, Inventory.product_id == Product.id)
+    q = db.query(Inventory, Product, Warehouse).join(Product, Inventory.product_id == Product.id).outerjoin(Warehouse, Inventory.warehouse_id == Warehouse.id).filter(Warehouse.is_active == True)
 
     if args.get("product_id"):
         q = q.filter(Inventory.product_id == args["product_id"])
@@ -67,7 +69,7 @@ def _query_inventory(args: dict, db: Session) -> dict:
 
     rows = q.limit(args.get("limit", 100)).all()
     items = []
-    for inv, prod in rows:
+    for inv, prod, wh in rows:
         ratio = inv.quantity / prod.min_stock if prod.min_stock > 0 else 999
         if inv.quantity == 0:
             status = "缺货"
@@ -108,12 +110,23 @@ def _analyze_stock_risk(args: dict, db: Session) -> dict:
 
     results = []
     for inv, prod in rows:
+        # Query recent 30-day sales for this product
+        recent = (
+            db.query(SaleOrderItem.quantity, SaleOrder.order_date)
+            .join(SaleOrder, SaleOrder.id == SaleOrderItem.order_id)
+            .filter(SaleOrderItem.product_id == prod.id)
+            .order_by(SaleOrder.order_date.desc())
+            .limit(30)
+            .all()
+        )
+        recent_sales = [{"date": str(r[1]), "qty": float(r[0] or 0)} for r in recent]
+
         ai = analyze_stock_alert(
             product_name=prod.name,
             current_qty=float(inv.quantity),
             min_stock=float(prod.min_stock),
             max_stock=float(prod.max_stock),
-            recent_sales=[],
+            recent_sales=recent_sales,
         )
         results.append({
             "product_id": prod.id,

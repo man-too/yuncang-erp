@@ -180,6 +180,10 @@ function sanitizeContent(content: string, blocks: MessageBlock[]): { cleanConten
           chartPattern.lastIndex = match.index + match[0].length
         }
     }
+    // Fallback: advance lastIndex to prevent infinite loop
+    if (chartPattern.lastIndex <= start) {
+      chartPattern.lastIndex = start + 1
+    }
   }
 
   cleanContent = cleanContent.trim()

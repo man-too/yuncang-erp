@@ -91,7 +91,7 @@ export const inventoryApi = {
   alerts: (params?: any) => http.get('/inventory/alerts', { params }),
   deleteAlert: (id: number) => http.delete(`/inventory/alerts/${id}`),
   resolveAlert: (id: number) => http.post(`/inventory/alerts/${id}/resolve`),
-  heatmap: (params?: any) => http.get('/inventory/alerts/heatmap', { params }),
+  heatmap: (params?: any) => http.get('/inventory/heatmap', { params }),
   lowStock: (params?: any) => http.get('/inventory/low-stock', { params }),
 }
 
@@ -115,7 +115,7 @@ export const saleApi = {
 /** AI 智能决策 */
 export const aiApi = {
   stockAlert: (productId: number) => http.post('/ai/stock-alert', null, { params: { product_id: productId } }),
-  salesForecast: (productId: number) => http.post('/ai/sales-forecast', null, { params: { product_id: productId } }),
+  salesForecast: (productId: number) => http.post('/ai/sales-prediction', null, { params: { product_id: productId } }),
   supplierRecommend: (productId: number) => http.post('/ai/supplier-recommend', null, { params: { product_id: productId } }),
   history: (params?: any) => http.get('/ai/history', { params }),
   dashboard: () => http.get('/ai/dashboard'),

@@ -95,7 +95,22 @@ def ai_stock_alert(
         result,
         product_id,
     )
-    return record
+    try:
+        parsed_output = json.loads(record.output_data) if isinstance(record.output_data, str) else record.output_data
+    except (json.JSONDecodeError, TypeError):
+        parsed_output = record.output_data
+    return {
+        "id": record.id,
+        "decision_type": record.decision_type,
+        "title": record.title,
+        "input_data": record.input_data,
+        "output_data": parsed_output,
+        "summary": record.summary,
+        "confidence": record.confidence,
+        "related_id": record.related_id,
+        "is_applied": record.is_applied,
+        "created_at": str(record.created_at) if record.created_at else None,
+    }
 
 
 @router.post("/stock-alert-batch")
@@ -172,42 +187,6 @@ def ai_stock_alert_batch(
     return {"results": results}
 
 
-@router.post("/sales-forecast")
-def ai_sales_forecast(
-    product_id: int = Query(...),
-    db: Session = Depends(get_db),
-    _user: User = Depends(get_current_user),
-):
-    """AI 销售预测"""
-    product = db.query(Product).filter(Product.id == product_id).first()
-    if not product:
-        raise HTTPException(status_code=404, detail="产品不存在")
-
-    from app.models.sale import SaleOrderItem, SaleOrder
-    history = (
-        db.query(SaleOrderItem, SaleOrder.order_date)
-        .join(SaleOrder, SaleOrder.id == SaleOrderItem.order_id)
-        .filter(SaleOrderItem.product_id == product_id)
-        .order_by(SaleOrder.order_date.desc())
-        .limit(90)
-        .all()
-    )
-    sales_data = [{"period": str(order_date), "qty": soi.quantity} for soi, order_date in history]
-
-    result = sales_forecast(product.name, sales_data)
-    if result and result.get("status") == "error":
-        raise HTTPException(status_code=503, detail=result.get("error", "AI 服务不可用"))
-
-    record = save_decision(
-        db, "sales_forecast",
-        f"{product.name} 销售预测",
-        {"product_id": product_id},
-        result,
-        product_id,
-    )
-    return record
-
-
 @router.post("/supplier-recommend")
 def ai_supplier_recommend(
     product_id: int = Query(...),
@@ -225,7 +204,7 @@ def ai_supplier_recommend(
             "id": s.id,
             "name": s.name,
             "rating": s.rating,
-            "lead_time": s.delivery_lead_time,
+            "delivery_lead_time": s.delivery_lead_time,
         }
         for s in suppliers
     ]
@@ -244,7 +223,22 @@ def ai_supplier_recommend(
         result,
         product_id,
     )
-    return record
+    try:
+        parsed_output = json.loads(record.output_data) if isinstance(record.output_data, str) else record.output_data
+    except (json.JSONDecodeError, TypeError):
+        parsed_output = record.output_data
+    return {
+        "id": record.id,
+        "decision_type": record.decision_type,
+        "title": record.title,
+        "input_data": record.input_data,
+        "output_data": parsed_output,
+        "summary": record.summary,
+        "confidence": record.confidence,
+        "related_id": record.related_id,
+        "is_applied": record.is_applied,
+        "created_at": str(record.created_at) if record.created_at else None,
+    }
 
 
 @router.get("/history")
@@ -268,7 +262,7 @@ def ai_dashboard(db: Session = Depends(get_db), _user: User = Depends(get_curren
     low_stock_products = (
         db.query(Inventory, Product)
         .join(Product, Inventory.product_id == Product.id)
-        .filter(Inventory.quantity <= Product.min_stock)
+        .filter(Inventory.quantity <= Product.min_stock, Product.is_active == True)
         .count()
     )
     # AI 建议统计
@@ -385,7 +379,7 @@ def ai_supplier_ranking(
             "id": s.id,
             "name": s.name,
             "rating": s.rating,
-            "lead_time": s.delivery_lead_time,
+            "delivery_lead_time": s.delivery_lead_time,
             "avg_evaluation": avg_total,
             "delivery_rate": delivery_rate_val,
         })
@@ -508,4 +502,19 @@ def ai_sales_prediction(
         result,
         product_id,
     )
-    return record
+    try:
+        parsed_output = json.loads(record.output_data) if isinstance(record.output_data, str) else record.output_data
+    except (json.JSONDecodeError, TypeError):
+        parsed_output = record.output_data
+    return {
+        "id": record.id,
+        "decision_type": record.decision_type,
+        "title": record.title,
+        "input_data": record.input_data,
+        "output_data": parsed_output,
+        "summary": record.summary,
+        "confidence": record.confidence,
+        "related_id": record.related_id,
+        "is_applied": record.is_applied,
+        "created_at": str(record.created_at) if record.created_at else None,
+    }

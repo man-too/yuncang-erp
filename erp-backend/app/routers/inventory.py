@@ -273,6 +273,55 @@ def alert_heatmap(
     return items
 
 
+# 兼容别名：更语义化的路径
+@router.get("/heatmap")
+def inventory_heatmap(
+    warehouse_id: Optional[int] = Query(None, description="仓库ID筛选"),
+    product_id: Optional[int] = Query(None, description="产品ID筛选"),
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """库存热力图数据（语义化路径，推荐使用）"""
+    # 复用 alert_heatmap 逻辑
+    query = db.query(Inventory, Product).join(Product, Inventory.product_id == Product.id)
+    if warehouse_id:
+        query = query.filter(Inventory.warehouse_id == warehouse_id)
+    if product_id:
+        query = query.filter(Inventory.product_id == product_id)
+
+    warehouses = db.query(Warehouse).filter(Warehouse.is_active == True).all()
+    wh_map = {w.id: w.name for w in warehouses}
+
+    items = []
+    for inv, prod in query.all():
+        if prod.max_stock > 0 and prod.min_stock >= 0:
+            if inv.quantity <= prod.min_stock:
+                alert_level = round(1.0 - (inv.quantity / prod.min_stock if prod.min_stock > 0 else 1.0), 2)
+            elif inv.quantity >= prod.max_stock:
+                ratio = (inv.quantity - prod.max_stock) / prod.max_stock
+                alert_level = min(1.0, round(0.6 + ratio * 0.4, 2))
+            else:
+                alert_level = 0.0
+        else:
+            alert_level = 0.0
+
+        items.append({
+            "warehouse_id": inv.warehouse_id,
+            "warehouse_name": wh_map.get(inv.warehouse_id, f"仓库#{inv.warehouse_id}"),
+            "product_id": inv.product_id,
+            "product_name": prod.name,
+            "product_code": prod.code,
+            "quantity": inv.quantity,
+            "min_stock": prod.min_stock,
+            "max_stock": prod.max_stock,
+            "alert_level": max(0.0, alert_level),
+            "unit": prod.unit,
+            "purchase_price": float(prod.purchase_price),
+        })
+
+    return items
+
+
 # ========== 低库存 ==========
 @router.get("/low-stock")
 def list_low_stock(

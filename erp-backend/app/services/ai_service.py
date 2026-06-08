@@ -78,7 +78,7 @@ def _call_llm(system_prompt: str, user_prompt: str) -> dict | None:
                             except json.JSONDecodeError:
                                 break
             # If still fails, return content as-is with ok status
-            return {"status": "ok", "content": text, "confidence": 0.5}
+            return {"status": "error", "error": "AI 返回格式异常，无法解析为结构化结果", "suggestion": None, "confidence": 0}
     except Exception as e:
         logger.error(f"AI 调用失败: {e}")
         return {"status": "error", "error": str(e), "suggestion": None, "confidence": 0}
