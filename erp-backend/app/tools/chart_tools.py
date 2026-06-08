@@ -791,7 +791,7 @@ def _render_comprehensive_diagnosis(db: Session) -> dict:
         .scalar()
     ) or 0
     total_inventory_value = (
-        db.query(func.sum(Inventory.quantity * Product.unit_price))
+        db.query(func.sum(Inventory.quantity * Product.cost_price))
         .join(Product, Inventory.product_id == Product.id)
         .filter(Inventory.quantity > 0)
         .scalar()
@@ -962,7 +962,7 @@ def _render_purchase_advice(db: Session) -> dict:
         rec["推荐供应商"] = best_supplier_name
         # Estimate purchase amount: suggested_qty * product unit_price
         product = db.query(Product).filter(Product.id == product_id).first()
-        unit_price = float(product.unit_price) if product and product.unit_price else 0
+        unit_price = float(product.cost_price) if product and product.cost_price else 0
         estimated_amount = round(rec.get("suggested_qty", 0) * unit_price, 2)
         rec["预估金额"] = estimated_amount
 
