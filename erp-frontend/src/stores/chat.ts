@@ -149,7 +149,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  /** 快捷操作：直接调 API 生成图表 + 同时发给 LLM 做文本分析 */
+  /** 快捷操作：先拿确定性图表，再发给 LLM 做文字分析 */
   async function sendQuickAction(type: string, content: string) {
     if (!content.trim() || isLoading.value) return
 
@@ -157,16 +157,24 @@ export const useChatStore = defineStore('chat', () => {
     isLoading.value = true
 
     try {
-      // Step 1: Always fetch direct chart blocks (non-blocking for LLM)
+      // Step 1: Always fetch direct chart blocks from backend (100% deterministic)
       const directBlocks: MessageBlock[] = await fetchQuickActionBlocks(type)
 
-      // Step 2: Try LLM for text analysis
+      // Step 2: Ask LLM for text analysis only (charts already displayed)
       let llmContent = ''
       let llmBlocks: MessageBlock[] = []
       try {
         const apiMessages = messages.value
           .filter(m => m.role !== 'system')
           .map(m => ({ role: m.role, content: m.content }))
+
+        // Append a system hint so LLM doesn't generate duplicate charts
+        apiMessages.push({
+          role: 'system',
+          content: directBlocks.length > 0
+            ? '注意：可视化图表已经由系统自动生成并展示给用户了。你只需要提供文字分析和建议，不需要再调用任何 render_* 或图表生成工具。'
+            : '请调用合适的工具获取数据，按用户需求在 blocks 中返回图表或表格。',
+        } as any)
 
         const res: any = await aiApi.chat({
           messages: apiMessages,
@@ -183,7 +191,7 @@ export const useChatStore = defineStore('chat', () => {
         }
       }
 
-      // Step 3: Merge and display
+      // Step 3: Merge — directBlocks first (charts), llmBlocks has action buttons etc.
       addMessage({
         role: 'assistant',
         content: llmContent,
