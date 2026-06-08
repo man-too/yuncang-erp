@@ -134,8 +134,22 @@ def ai_suggested_qty(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """ROP建议采购量"""
+    """ROP建议采购量（单个产品）"""
     return execute_tool("calc_reorder_point", {"product_id": product_id, "supplier_id": supplier_id}, db)
+
+
+@router.post("/batch-rop")
+def ai_batch_rop(
+    data: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """批量计算 ROP（多个产品一次性）"""
+    from app.services.calculation_service import batch_calc_reorder_point
+    product_ids = data.get("product_ids", [])
+    if not product_ids:
+        return {}
+    return batch_calc_reorder_point(product_ids, db)
 
 
 @router.post("/supplier-score")

@@ -135,6 +135,8 @@ export const aiApi = {
   inventoryKpi: () => http.post('/ai/inventory-kpi'),
   /** ROP 建议采购量 */
   suggestedQty: (data: { product_id: number; supplier_id?: number }) => http.post('/ai/suggested-qty', null, { params: data }),
+  /** 批量 ROP 计算 */
+  batchRop: (data: { product_ids: number[] }) => http.post('/ai/batch-rop', data),
   /** 供应商综合评分 */
   supplierScore: (data?: { supplier_ids?: number[] }) => http.post('/ai/supplier-score', data),
   /** 天气查询 */

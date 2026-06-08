@@ -25,13 +25,21 @@
       <div class="table-header">
         <span class="section-title">库存产品清单</span>
         <div class="header-right">
-          <span class="section-count">共 {{ store.allProducts.length }} 项</span>
+          <el-input
+            v-model="searchKeyword"
+            placeholder="搜索产品…"
+            clearable
+            size="small"
+            :prefix-icon="Search"
+            style="width: 200px;"
+          />
+          <span class="section-count">共 {{ filteredProducts.length }} 项</span>
           <el-button type="primary" size="default" @click="openAddDialog">+ 添加产品</el-button>
         </div>
       </div>
 
       <el-table
-        :data="sortedProducts"
+        :data="filteredProducts"
         max-height="480"
         size="small"
         stripe
@@ -58,7 +66,13 @@
             <span :class="{ 'text-danger': row.current_qty < row.min_stock }">{{ row.current_qty }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="min_stock" label="最低库存" min-width="90" align="right" />
+        <el-table-column prop="min_stock" label="安全库存" min-width="90" align="right" />
+        <el-table-column label="ROP" min-width="80" align="right">
+          <template #default="{ row }">
+            <span v-if="ropMap[row.product_id] != null" class="rop-cell">{{ ropMap[row.product_id] }}</span>
+            <span v-else class="rop-none">—</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="max_stock" label="最高库存" min-width="90" align="right" />
         <el-table-column label="操作" width="130" align="center" fixed="right">
           <template #default="{ row }">
@@ -176,6 +190,44 @@
       </div>
     </div>
 
+    <!-- Section 3: AI Intelligent Recommendation -->
+    <div v-if="aiRecommendationLoading || aiContent" class="ai-section">
+      <div class="section-row">
+        <span class="section-title">🤖 AI 智能分析</span>
+        <el-button v-if="!aiRecommendationLoading" size="small" @click="loadAiRecommendation">
+          重新分析
+        </el-button>
+      </div>
+
+      <!-- Loading -->
+      <div v-if="aiRecommendationLoading" class="ai-loading" v-loading="true" element-loading-text="AI 分析中…"></div>
+
+      <!-- Content -->
+      <div v-else-if="aiContent" class="ai-content-card">
+        <div class="ai-text" v-html="renderedContent"></div>
+
+        <!-- Render charts from AI blocks -->
+        <div v-for="(block, bi) in aiBlocks" :key="bi" class="ai-block">
+          <div v-if="block.type === 'chart'" class="ai-chart-wrapper">
+            <v-chart
+              v-if="block.data"
+              :option="block.data"
+              autoresize
+              style="height: 320px;"
+            />
+          </div>
+          <div v-else-if="block.type === 'table'" class="ai-table-wrapper">
+            <el-table :data="block.rows || []" stripe size="small" border max-height="300">
+              <el-table-column
+                v-for="col in (block.columns || [])" :key="col.key"
+                :prop="col.key" :label="col.title" min-width="100" show-overflow-tooltip
+              />
+            </el-table>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Add / Edit Dialog -->
     <el-dialog
       v-model="dialogVisible"
@@ -230,6 +282,7 @@ import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent, DataZoomComponent } from 'echarts/components'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
+import { Search } from '@element-plus/icons-vue'
 import { usePurchaseDecisionStore } from '@/stores/purchaseDecision'
 import { aiApi, inventoryApi, productApi } from '@/api'
 
@@ -264,11 +317,118 @@ const kpiCapitalOccupied = computed(() => {
 })
 
 // =========================================================================
-// Section 2: Product List (sorted by risk)
+// Section 2: Product List (sorted by risk, filtered by keyword)
 // =========================================================================
 
-function riskRank(item: { current_qty: number; min_stock: number; max_stock: number }): number {
+const searchKeyword = ref('')
+
+// =========================================================================
+// Section 2b: Batch ROP data (loaded on mount for risk ranking)
+// =========================================================================
+
+const ropMap = ref<Record<number, number>>({})
+const batchRopLoading = ref(false)
+
+async function loadBatchRop() {
+  const ids = store.allProducts.map(p => p.product_id).filter(Boolean)
+  if (ids.length === 0) return
+  batchRopLoading.value = true
+  try {
+    const res: any = await aiApi.batchRop({ product_ids: ids })
+    if (res) {
+      const map: Record<number, number> = {}
+      for (const [pid, data] of Object.entries(res)) {
+        const d = data as any
+        map[Number(pid)] = d.rop ?? 0
+      }
+      ropMap.value = map
+    }
+  } catch {
+    // Batch ROP is optional fallback
+  } finally {
+    batchRopLoading.value = false
+  }
+}
+
+function getRop(productId: number): number | null {
+  return ropMap.value[productId] ?? null
+}
+
+// =========================================================================
+// Section 3: AI Intelligent Recommendation
+// =========================================================================
+
+const aiRecommendationLoading = ref(false)
+const aiContent = ref('')
+const aiBlocks = ref<any[]>([])
+
+const renderedContent = computed(() => {
+  if (!aiContent.value) return ''
+  // Simple markdown-like rendering to HTML
+  let html = aiContent.value
+    .replace(/### (.+)/g, '<h4>$1</h4>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/- (.+)/g, '<li>$1</li>')
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/\n/g, '<br>')
+  return `<p>${html}</p>`
+})
+
+async function loadAiRecommendation() {
+  if (store.allProducts.length === 0) return
+  aiRecommendationLoading.value = true
+  aiContent.value = ''
+  aiBlocks.value = []
+  try {
+    const productList = store.allProducts.slice(0, 10).map(p => {
+      const rop = ropMap.value[p.product_id]
+      const ropStr = rop != null ? ` / ROP: ${rop}` : ''
+      return `${p.product_name}（库存: ${p.current_qty} / 安全: ${p.min_stock}${ropStr} / 最高: ${p.max_stock}）`
+    }).join('\n')
+    const kpiInfo = store.inventoryKpi
+      ? `周转天数: ${store.inventoryKpi.turnover_days}，呆滞品: ${store.inventoryKpi.dead_stock_count}，资金: ${store.inventoryKpi.capital_occupied}`
+      : ''
+
+    const res: any = await aiApi.chat({
+      messages: [
+        { role: 'user', content: `请分析当前库存状况并给出补货建议。\n\n库存KPI:\n${kpiInfo}\n\n待补货产品列表:\n${productList}\n\n请给出：1. 总体库存健康度评估 2. 按优先级列出需补货产品及建议量 3. 特殊风险提示` },
+      ],
+      conversation_id: '',
+    })
+    if (res) {
+      aiContent.value = res.content || ''
+      aiBlocks.value = Array.isArray(res.blocks) ? res.blocks : []
+    }
+  } catch {
+    aiContent.value = 'AI 分析服务暂不可用'
+  } finally {
+    aiRecommendationLoading.value = false
+  }
+}
+
+// Watch for products to load → auto-expand first product, load ROP, and run AI analysis
+watch(() => store.allProducts.length, (len) => {
+  if (len > 0) {
+    // Auto-expand the first (most risky) product
+    if (!expandedProductId.value) {
+      expandedProductId.value = store.allProducts[0].product_id
+    }
+    // Load batch ROP for all products (for accurate risk ranking)
+    loadBatchRop()
+    // Run AI analysis if not already done
+    if (!aiContent.value && !aiRecommendationLoading.value) {
+      loadAiRecommendation()
+    }
+  }
+})
+
+function riskRank(item: { product_id: number; current_qty: number; min_stock: number; max_stock: number }): number {
   if (item.current_qty < item.min_stock) return 0 // 缺货
+  // 用 ROP 判断：高于安全库存但低于 ROP → 偏低(1)
+  const rop = ropMap.value[item.product_id]
+  if (rop != null && rop > item.min_stock && item.current_qty < rop) return 1 // 低于ROP
+  if (rop != null && item.current_qty >= rop) return 2 // 正常（>= ROP）
+  // ROP 不可用时，用比例估算兜底
   const range = item.max_stock - item.min_stock
   if (range <= 0) return 2
   const ratio = (item.current_qty - item.min_stock) / range
@@ -283,12 +443,21 @@ const sortedProducts = computed(() => {
   })
 })
 
-function statusLabel(row: { current_qty: number; min_stock: number; max_stock: number }): string {
+const filteredProducts = computed(() => {
+  if (!searchKeyword.value.trim()) return sortedProducts.value
+  const kw = searchKeyword.value.trim().toLowerCase()
+  return sortedProducts.value.filter(p =>
+    p.product_name.toLowerCase().includes(kw) ||
+    (p.product_code && p.product_code.toLowerCase().includes(kw))
+  )
+})
+
+function statusLabel(row: { product_id: number; current_qty: number; min_stock: number; max_stock: number }): string {
   const r = riskRank(row)
-  return ['缺货', '偏低', '正常', '偏高'][r] || '正常'
+  return ['缺货', '低于ROP', '正常', '偏高'][r] || '正常'
 }
 
-function statusTagType(row: { current_qty: number; min_stock: number; max_stock: number }): string {
+function statusTagType(row: { product_id: number; current_qty: number; min_stock: number; max_stock: number }): string {
   const r = riskRank(row)
   return ['danger', 'warning', 'success', 'info'][r] || 'info'
 }
@@ -734,6 +903,13 @@ onMounted(async () => {
   color: #f56c6c;
   font-weight: 600;
 }
+.rop-cell {
+  font-weight: 600;
+  color: #005BF5;
+}
+.rop-none {
+  color: #c0c4cc;
+}
 
 /* ========================================================================== */
 /* Expandable Detail Panel                                                    */
@@ -865,5 +1041,63 @@ onMounted(async () => {
 .qty-hint {
   font-size: 12px;
   color: var(--text-secondary, #909399);
+}
+
+/* ========================================================================== */
+/* AI Recommendation Section                                                   */
+/* ========================================================================== */
+.ai-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.section-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.ai-loading {
+  min-height: 80px;
+}
+.ai-content-card {
+  background: linear-gradient(135deg, #f5f7fa, #eef2f7);
+  border: 1px solid #d9e2ef;
+  border-radius: 10px;
+  padding: 18px 22px;
+}
+.ai-text {
+  font-size: 14px;
+  line-height: 1.8;
+  color: #303133;
+}
+.ai-text p {
+  margin: 4px 0;
+}
+.ai-text li {
+  margin-left: 16px;
+  list-style: disc;
+}
+.ai-text h4 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 12px 0 6px;
+  color: #005BF5;
+}
+.ai-text h4:first-child {
+  margin-top: 0;
+}
+.ai-block {
+  margin-top: 16px;
+}
+.ai-chart-wrapper {
+  border: 1px solid var(--border-light, #ebeef5);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+}
+.ai-table-wrapper {
+  border: 1px solid var(--border-light, #ebeef5);
+  border-radius: 8px;
+  overflow: hidden;
 }
 </style>

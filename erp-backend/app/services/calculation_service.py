@@ -269,3 +269,122 @@ def _std(values: list[float]) -> float:
         return 0.0
     mean = sum(values) / n
     return math.sqrt(sum((x - mean) ** 2 for x in values) / n)
+
+
+def batch_calc_reorder_point(
+    product_ids: list[int],
+    db: Session,
+) -> dict[int, dict]:
+    """批量计算再订货点 (ROP)，避免逐个查询的开销"""
+    from app.models.product import Product
+    from app.models.supplier import Supplier
+    from app.models.purchase import PurchaseOrder, PurchaseOrderItem
+    from app.models.sale import SaleOrder, SaleOrderItem
+
+    if not product_ids:
+        return {}
+
+    products = {p.id: p for p in db.query(Product).filter(Product.id.in_(product_ids)).all()}
+
+    # ── 默认 lead_time ──
+    # 取各产品最近采购供应商的交期
+    last_po_items = (
+        db.query(
+            PurchaseOrderItem.product_id,
+            PurchaseOrder.supplier_id,
+        )
+        .join(PurchaseOrder, PurchaseOrderItem.order_id == PurchaseOrder.id)
+        .filter(
+            PurchaseOrderItem.product_id.in_(product_ids),
+            PurchaseOrder.status != "cancelled",
+        )
+        .order_by(PurchaseOrder.order_date.desc())
+        .all()
+    )
+    supplier_ids = set(s for _, s in last_po_items)
+    suppliers = {s.id: s for s in db.query(Supplier).filter(Supplier.id.in_(supplier_ids)).all()}
+    lead_time_map: dict[int, int] = {}
+    seen_pids: set[int] = set()
+    for pid, sid in last_po_items:
+        if pid not in seen_pids:
+            seen_pids.add(pid)
+            sup = suppliers.get(sid)
+            lead_time_map[pid] = sup.delivery_lead_time if sup and sup.delivery_lead_time else 7
+    # 没找到采购记录的默认7天
+    for pid in product_ids:
+        lead_time_map.setdefault(pid, 7)
+
+    # ── 近 60 天日销量 ──
+    cutoff = date.today() - timedelta(days=60)
+    daily_rows = (
+        db.query(
+            SaleOrderItem.product_id,
+            func.date(SaleOrder.order_date).label("d"),
+            func.sum(SaleOrderItem.quantity).label("qty"),
+        )
+        .join(SaleOrderItem, SaleOrderItem.order_id == SaleOrder.id)
+        .filter(
+            SaleOrder.order_date >= cutoff,
+            SaleOrderItem.product_id.in_(product_ids),
+            SaleOrder.status != "cancelled",
+        )
+        .group_by(SaleOrderItem.product_id, func.date(SaleOrder.order_date))
+        .all()
+    )
+
+    # 按 product_id 聚合销量
+    sales_map: dict[int, list[float]] = {}
+    for pid, _, qty in daily_rows:
+        sales_map.setdefault(pid, []).append(float(qty or 0))
+
+    # ── ABC 分类 ──
+    def _abc(pid: int) -> str:
+        return "C"  # 简化处理，默认C类
+
+    _ABC_Z_BATCH = {"A": 1.65, "B": 1.28, "C": 1.04}
+
+    result: dict[int, dict] = {}
+    for pid in product_ids:
+        prod = products.get(pid)
+        if not prod:
+            continue
+        lt = lead_time_map.get(pid, 7)
+        quantities = sales_map.get(pid, [])
+        if not quantities:
+            result[pid] = {
+                "product_id": pid,
+                "product_name": prod.name,
+                "rop": prod.min_stock or 0,
+                "avg_daily_sales": 0.0,
+                "lead_time": lt,
+                "safety_stock": prod.min_stock or 0,
+                "abc_class": "C",
+            }
+            continue
+
+        sum_q = sum(quantities)
+        k = len(quantities)
+        avg_daily = sum_q / 60
+        if k >= 2 and avg_daily > 0:
+            ssd = sum((q - avg_daily) ** 2 for q in quantities)
+            ssd += (60 - k) * (avg_daily ** 2)
+            std_daily = math.sqrt(ssd / 60)
+        else:
+            std_daily = avg_daily * 0.3 if avg_daily > 0 else 0.0
+
+        abc = _abc(pid)
+        z = _ABC_Z_BATCH.get(abc, 1.04)
+        safety_stock = z * std_daily * math.sqrt(lt)
+        rop = avg_daily * lt + safety_stock
+
+        result[pid] = {
+            "product_id": pid,
+            "product_name": prod.name,
+            "rop": round(rop, 2),
+            "avg_daily_sales": round(avg_daily, 2),
+            "lead_time": lt,
+            "safety_stock": round(safety_stock, 2),
+            "abc_class": abc,
+        }
+
+    return result

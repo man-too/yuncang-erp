@@ -477,7 +477,7 @@ def ai_sales_prediction(
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    """AI 销售预测"""
+    """AI 销售预测（AI 不可用时 WMA 兜底）"""
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="产品不存在")
@@ -493,28 +493,27 @@ def ai_sales_prediction(
     sales_data = [{"date": str(h.order_date), "qty": h.quantity} for h in history_data]
 
     result = sales_forecast(product.name, sales_data)
-    if result and result.get("status") == "error":
-        raise HTTPException(status_code=503, detail=result.get("error", "AI 服务不可用"))
-    record = save_decision(
-        db, "sales_forecast",
-        f"{product.name} 销售预测",
-        {"product_id": product_id},
-        result,
-        product_id,
-    )
-    try:
-        parsed_output = json.loads(record.output_data) if isinstance(record.output_data, str) else record.output_data
-    except (json.JSONDecodeError, TypeError):
-        parsed_output = record.output_data
+    predictions = []
+    if result and result.get("predictions"):
+        predictions = result["predictions"]
+    elif result and result.get("status") == "error":
+        # AI unavailable — fall back to WMA
+        from app.tools.sales_tools import _wma_fallback
+        hist_for_wma = [{"date": d["date"], "quantity": d["qty"]} for d in sales_data]
+        predictions = _wma_fallback(hist_for_wma, 30)
+
+    # Generate prediction dates
+    last_date = history_data[0][1] if history_data else date.today()
+    prediction_dates = [(last_date + timedelta(days=i + 1)).strftime("%Y-%m-%d") for i in range(len(predictions))]
+
     return {
-        "id": record.id,
-        "decision_type": record.decision_type,
-        "title": record.title,
-        "input_data": record.input_data,
-        "output_data": parsed_output,
-        "summary": record.summary,
-        "confidence": record.confidence,
-        "related_id": record.related_id,
-        "is_applied": record.is_applied,
-        "created_at": str(record.created_at) if record.created_at else None,
+        "product_id": product.id,
+        "product_name": product.name,
+        "history": sales_data[-30:],
+        "predictions": predictions,
+        "prediction_dates": prediction_dates,
+        "trend": (result or {}).get("trend", "平稳"),
+        "seasonal_factor": (result or {}).get("seasonal_factor", ""),
+        "suggestion": (result or {}).get("suggestion", ""),
+        "confidence": (result or {}).get("confidence", 0),
     }
