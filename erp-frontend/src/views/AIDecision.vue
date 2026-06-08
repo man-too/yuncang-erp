@@ -51,7 +51,6 @@ import { aiApi } from '@/api'
 import PurchaseDecisionWizard from '@/views/ai/PurchaseDecisionWizard.vue'
 import DecisionChat from '@/views/ai/DecisionChat.vue'
 import { usePurchaseDecisionStore } from '@/stores/purchaseDecision'
-
 const purchaseStore = usePurchaseDecisionStore()
 const historyOpen = ref(false)
 const historyList = ref<any[]>([])

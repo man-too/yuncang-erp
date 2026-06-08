@@ -17,66 +17,48 @@ client = None
 if settings.OPENAI_API_KEY:
     client = OpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.AI_BASE_URL)
 
-SYSTEM_PROMPT = """你是供应链ERP系统的AI决策助手。你的核心能力是：用户问数据类问题→调工具查数据→用图表展示→文字分析。
+SYSTEM_PROMPT = """你是供应链ERP的AI助手。你的能力是调用工具查询数据库，然后根据问题类型选择回复方式。
 
-## 第一准则：有数据就有图表
-用户任何涉及数据的问题（销售、库存、供应商、产品、趋势、排名等），你必须：
-1. 调用工具获取数据（至少1个，推荐2-3个多维度）
-2. 在回复的 blocks 中用图表/表格展示数据
-3. 再用文字分析
+## 回复策略
+- 用户问具体数值或简单排行（"多少""几个""多少钱""哪个好""哪个最多""库存量""销量""金额"等）→ 只查数据，文字回复，不画图
+- 用户明确要图表（"画图""看图""趋势图""柱状图""折线图""热力图""图表"等）→ 查数据 + 图表展示 + 文字分析
+- 不确定用户意图时 → 文字回复，不画图。宁可少画图也不要乱画图
 
-## 工具说明（重要：不要同时调用查询工具和同名渲染工具，避免重复图表）
-库存：调用 render_inventory_heatmap（含图表+表格），或 query_inventory（需要自己画图时）— 不要两个都调
-销售：调用 render_sales_trend（含图表+预测），或 query_sales_history + forecast_sales（需要自己画图时）
-供应商：调用 render_supplier_ranking（含图表+排名），或 query_suppliers / rank_suppliers — 不要重复
-综合诊断：只调 render_comprehensive_diagnosis
-采购建议：只调 render_purchase_advice 或 recommend_restock
-推荐：recommend_restock / recommend_supplier — 多维度推荐
+## 工具选择
+- 库存概览（需要图表时）→ render_inventory_heatmap
+- 销售趋势/预测（需要图表时）→ render_sales_trend
+- 供应商排名（需要图表时）→ render_supplier_ranking
+- 综合诊断 → render_comprehensive_diagnosis
+- 采购建议 → render_purchase_advice
+- 单独查数据（不需要图表或只要数值）→ query_inventory / query_sales_history / query_suppliers 等
+- 不要同时调 render_* 和对应的 query_*，避免重复数据
 
-库存分析规则：当返回库存相关 blocks（图表或表格）时，必须在 content 中包含文字分析：
+## 回复格式（必须返回严格 JSON）
+{"content": "markdown文字", "blocks": []}
+- content 放文字分析，不要嵌入 JSON 或代码
+- blocks 可选，只在用户明确要看图表时才放内容
+
+blocks 中每个元素为以下三种之一：
+图表 block：{"type": "chart", "chartType": "line|bar|pie|heatmap|scatter|radar", "data": {完整 ECharts option}}
+表格 block：{"type": "table", "columns": [{"key": "键", "title": "列标题"}], "rows": [{"键": "值"}]}
+操作按钮 block：{"type": "actions", "actions": [{"label": "按钮文字", "action": "create_purchase_order|create_stock_transfer", "params": {...}, "confirmTitle": "确认标题", "confirmDetail": "详细描述"}]}
+
+## 库存分析规则
+当你决定输出库存相关图表时，在 content 中补充：
 1. 列出需补货的产品及建议补货量
 2. 说明理由（当前库存量、安全库存量、近期销量趋势）
-3. 按紧迫程度排序
-4. 用简洁的中文表达，控制在 200 字以内
-
-## 回复格式（必须返回JSON）
-{"content": "markdown文字", "blocks": [可视化块]}
-- content 中只放文字分析，不要放入任何 JSON 或代码
-- 所有图表/表格数据只能放在 blocks 数组中
-
-## 关键：无法获取数据时的处理
-如果调工具失败或数据为空，在 content 中明确告知用户原因，blocks 保持空数组。不要编造数据。
-以下操作只能以 action block 形式输出给用户，不能直接调用工具执行：
-- create_purchase_order: 创建采购订单
-- create_stock_transfer: 创建库存调拨单
-
-## 回复格式
-你必须返回严格的JSON格式，包含以下字段：
-{
-  "content": "Markdown格式的自然语言回复（面向业务人员，简洁实用，适当使用**加粗**、- 列表等格式）",
-  "blocks": []
-}
-
-blocks 是可选的结构化内容数组，每个元素可以是：
-
-1. 图表 block：
-{"type": "chart", "chartType": "line|bar|pie|heatmap|scatter|radar", "data": {完整的ECharts option对象}}
-注意 data 必须包含 title、tooltip、xAxis、yAxis、series 等完整配置。如果不需要legend则省略。所有文字标签使用中文。
-配色推荐：蓝色系(#5470c6, #91cc75, #fac858, #ee6666, #73c0de, #fc8452)
-
-2. 表格 block：
-{"type": "table", "columns": [{"key": "键", "title": "列标题"}], "rows": [{"键": "值"}]}
-
-3. 操作按钮 block：
-{"type": "actions", "actions": [{"label": "按钮文字", "action": "create_purchase_order|create_stock_transfer", "params": {...}, "confirmTitle": "确认标题", "confirmDetail": "详细描述"}]}
+3. 按紧迫程度排序，控制在 200 字以内
 
 ## 行为准则
-- 用户问数据类问题时，先调用工具获取最新数据再回答
-- 用图表直观展示数据趋势和对比
-- 当分析结果表明需要补货时，给出具体的采购建议并附带操作按钮
-- 当发现仓库间库存不均衡时，给出调拨建议并附带操作按钮
-- 对于跨领域问题（如"低库存产品的供应商表现如何"），依次调用多个工具再综合分析
-- 保持专业、简洁、可执行的风格"""
+- 无法获取数据时，content 说明原因，blocks 为空，不编造数据
+- 分析结果表明需要补货 → 附带采购操作按钮
+- 仓库间库存不均衡 → 附带调拨操作按钮
+- 跨领域问题 → 依次调用多个工具再综合分析
+- 保持专业、简洁、可执行的风格
+
+以下操作只能以 action block 输出，不能直接调用工具执行：
+- create_purchase_order: 创建采购订单
+- create_stock_transfer: 创建库存调拨单"""
 
 
 def build_welcome_context(db: Session) -> dict:
@@ -245,118 +227,6 @@ def build_welcome_message(context: dict) -> dict:
     return {"content": content, "blocks": blocks}
 
 
-def _auto_chart_from_result(tool_name: str, result: dict) -> dict | None:
-    """自动从工具结果中提取数据并生成图表 block"""
-    if not isinstance(result, dict):
-        return None
-
-    # query_sales_history → 折线图
-    if tool_name == "query_sales_history":
-        items = result.get("items", [])
-        if 2 <= len(items) <= 60:
-            dates = [str(i.get("date", i.get("period", ""))) for i in items]
-            values = [float(i.get("quantity", i.get("amount", 0))) for i in items]
-            label = "销量" if "quantity" in (items[0] if items else {}) else "金额"
-            return {
-                "type": "chart", "chartType": "line",
-                "data": {
-                    "title": {"text": "销售趋势", "left": "center", "textStyle": {"fontSize": 14}},
-                    "tooltip": {"trigger": "axis"},
-                    "legend": {"data": [label], "bottom": 0},
-                    "grid": {"left": 60, "right": 30, "top": 40, "bottom": 40},
-                    "xAxis": {"type": "category", "data": dates, "axisLabel": {"rotate": 30, "fontSize": 10}},
-                    "yAxis": {"type": "value", "name": label},
-                    "dataZoom": [{"type": "inside"}],
-                    "series": [{"name": label, "type": "line", "smooth": True, "data": values,
-                                "lineStyle": {"color": "#5470c6", "width": 2}, "areaStyle": {"color": "rgba(84,112,198,0.12)"}}],
-                },
-            }
-
-    # forecast_sales → 预测数据 + 历史数据合并为双线图
-    if tool_name == "forecast_sales":
-        history = result.get("history", [])
-        forecast_qty = result.get("forecast_next_30d", 0)
-        trend = result.get("trend", "")
-        if history:
-            hist_dates = [str(h.get("date", "")) for h in history]
-            hist_values = [float(h.get("quantity", 0)) for h in history]
-            # Generate future dates for prediction
-            last_date = hist_dates[-1] if hist_dates else ""
-            try:
-                from datetime import datetime, timedelta
-                last = datetime.strptime(last_date, "%Y-%m-%d") if last_date else datetime.today()
-                fut_dates = [(last + timedelta(days=i+1)).strftime("%Y-%m-%d") for i in range(7)]
-            except:
-                fut_dates = [f"预测D+{i+1}" for i in range(7)]
-            # Distribute forecast across 7 days
-            daily_forecast = round(forecast_qty / 7, 1) if forecast_qty > 0 else 0
-            fut_values = [daily_forecast] * 7
-
-            # Build dual-line chart with empty gaps
-            all_dates = hist_dates + fut_dates
-            all_hist = hist_values + [None] * len(fut_dates)
-            all_fcst = [None] * len(hist_values) + fut_values
-
-            return {
-                "type": "chart", "chartType": "line",
-                "data": {
-                    "title": {"text": "销售预测", "left": "center", "textStyle": {"fontSize": 14}},
-                    "tooltip": {"trigger": "axis", "axisPointer": {"type": "cross"}},
-                    "legend": {"data": ["历史销量", "预测销量"], "bottom": 0},
-                    "grid": {"left": 60, "right": 30, "top": 40, "bottom": 40},
-                    "xAxis": {"type": "category", "data": all_dates, "axisLabel": {"fontSize": 10}},
-                    "yAxis": {"type": "value", "name": "销量"},
-                    "dataZoom": [{"type": "inside"}, {"type": "slider", "bottom": 30}],
-                    "series": [
-                        {"name": "历史销量", "type": "line", "smooth": True, "data": all_hist,
-                         "lineStyle": {"color": "#5470c6", "width": 2}, "symbol": "circle", "symbolSize": 5},
-                        {"name": "预测销量", "type": "line", "smooth": True, "data": all_fcst,
-                         "lineStyle": {"color": "#fc8452", "width": 2, "type": "dashed"},
-                         "symbol": "diamond", "symbolSize": 7, "areaStyle": {"color": "rgba(252,132,82,0.1)"}},
-                    ],
-                },
-            }
-
-    # query_inventory → 柱状图
-    if tool_name == "query_inventory":
-        items = result.get("items", [])
-        if 2 <= len(items) <= 20:
-            names = [i.get("product_name", "") for i in items]
-            values = [float(i.get("quantity", 0)) for i in items]
-            return {
-                "type": "chart", "chartType": "bar",
-                "data": {
-                    "title": {"text": "库存分布", "left": "center", "textStyle": {"fontSize": 14}},
-                    "tooltip": {"trigger": "axis"},
-                    "grid": {"left": 60, "right": 30, "top": 40, "bottom": 60},
-                    "xAxis": {"type": "category", "data": names, "axisLabel": {"rotate": 30, "fontSize": 10}},
-                    "yAxis": {"type": "value", "name": "库存量"},
-                    "series": [{"name": "库存量", "type": "bar", "data": values, "itemStyle": {"color": "#5470c6"}, "barMaxWidth": 30}],
-                },
-            }
-
-    # query_suppliers / rank_suppliers → 柱状图
-    if tool_name in ("query_suppliers", "rank_suppliers"):
-        key = "suppliers" if "suppliers" in result else ("items" if "items" in result else None)
-        items = result.get(key, []) if key else []
-        if 2 <= len(items) <= 20:
-            names = [i.get("name", i.get("supplier_name", "")) for i in items]
-            values = [float(i.get("rating", i.get("total_score", 0))) for i in items]
-            return {
-                "type": "chart", "chartType": "bar",
-                "data": {
-                    "title": {"text": "供应商评分", "left": "center", "textStyle": {"fontSize": 14}},
-                    "tooltip": {"trigger": "axis"},
-                    "grid": {"left": 60, "right": 30, "top": 40, "bottom": 60},
-                    "xAxis": {"type": "category", "data": names, "axisLabel": {"rotate": 20, "fontSize": 10}},
-                    "yAxis": {"type": "value", "name": "评分"},
-                    "series": [{"name": "评分", "type": "bar", "data": values, "itemStyle": {"color": "#91cc75"}, "barMaxWidth": 30}],
-                },
-            }
-
-    return None
-
-
 def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
     """主对话函数，处理 Function Calling 循环"""
     if not client:
@@ -369,13 +239,13 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
 
     # 预处理：检测用户是否问数据问题，强制加一条 tool_trigger 提示
     user_msg = messages[-1].get("content", "") if messages else ""
-    data_keywords = ["销售", "库存", "供应商", "产品", "订单", "采购", "出库", "入库",
-                     "趋势", "预测", "排名", "对比", "分析", "数据", "统计", "报表",
-                     "预警", "风险", "利润", "成本", "金额", "销量", "数量"]
+    data_keywords = ["销售", "库存", "供应商", "产品", "商品", "订单", "采购", "出库", "入库",
+                     "预测", "数据", "统计", "报表", "预警", "风险", "利润", "成本",
+                     "金额", "销量", "数量", "热销", "卖"]
     if any(kw in user_msg for kw in data_keywords):
         full_messages.insert(1, {
             "role": "system",
-            "content": "用户问的是业务数据问题，你必须调用合适的工具来查询真实数据，不能只靠自己的知识回答。查询到数据后在blocks中用图表展示。",
+            "content": "用户问的是业务数据问题，你必须调用合适的工具来查询真实数据，不能只靠自己的知识回答。",
         })
 
     try:
@@ -416,22 +286,6 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
             full_messages.append(assistant_msg)
 
             direct_blocks: list = []
-            # Deduplicate: if render_X is called, skip auto-chart for query_X
-            called_render_tools = set()
-            for tc in msg.tool_calls:
-                if tc.function.name.startswith("render_"):
-                    called_render_tools.add(tc.function.name)
-            # Map render tools to their overlapping query tools
-            render_to_query = {
-                "render_inventory_heatmap": {"query_inventory", "analyze_stock_risk"},
-                "render_sales_trend": {"query_sales_history", "forecast_sales"},
-                "render_supplier_ranking": {"query_suppliers", "rank_suppliers"},
-                "render_comprehensive_diagnosis": {"query_inventory", "analyze_stock_risk"},
-                "render_purchase_advice": {"recommend_restock", "query_inventory"},
-            }
-            skip_auto_chart_for = set()
-            for render_name in called_render_tools:
-                skip_auto_chart_for |= render_to_query.get(render_name, set())
 
             for tc in msg.tool_calls:
                 try:
@@ -475,11 +329,6 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                         "tool_call_id": tc.id,
                         "content": json.dumps(result, ensure_ascii=False, default=str)
                     })
-                    # Auto-generate chart ONLY if no overlapping render tool was called
-                    if tc.function.name not in skip_auto_chart_for:
-                        chart = _auto_chart_from_result(tc.function.name, result)
-                        if chart:
-                            direct_blocks.append(chart)
 
             # ═══ 日志②：工具执行完毕，准备第二次调 AI ═══
             logger.info(f"[Chat] 工具执行完毕, full_messages共{len(full_messages)}条, direct_blocks={len(direct_blocks)}个")
@@ -586,9 +435,6 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                             "role": "tool", "tool_call_id": tc.id,
                             "content": json.dumps(result, ensure_ascii=False, default=str)
                         })
-                        chart = _auto_chart_from_result(tc.function.name, result)
-                        if chart:
-                            direct_blocks.append(chart)
 
                 resp2 = client.chat.completions.create(
                     model=settings.OPENAI_MODEL,
