@@ -69,3 +69,17 @@ class SupplierEvaluation(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class SupplierMetrics(Base):
+    """供应商聚合指标 — 跨评估周期的统计量"""
+    __tablename__ = "supplier_metrics"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    supplier_id: Mapped[int] = mapped_column(Integer, index=True)
+    metric_date: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    delivery_delay_std: Mapped[float] = mapped_column(Float, nullable=True)  # 近6月交付延迟标准差
+    on_time_rate: Mapped[float] = mapped_column(Float, nullable=True)  # 准时交付率（预留）
+    quality_pass_rate: Mapped[float] = mapped_column(Float, nullable=True)  # 质检通过率（预留）

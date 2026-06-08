@@ -1,6 +1,6 @@
 """商品/物料模型"""
 from datetime import datetime
-from sqlalchemy import String, Text, Float, Integer, Boolean, DateTime, func
+from sqlalchemy import String, Text, Float, Integer, Boolean, DateTime, JSON, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -14,6 +14,7 @@ class ProductCategory(Base):
     name: Mapped[str] = mapped_column(String(100))
     parent_id: Mapped[int] = mapped_column(Integer, default=0)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    bullwhip_threshold: Mapped[float] = mapped_column(Float, default=1.5, server_default="1.5")  # 牛鞭效应预警阈值
     remark: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -37,6 +38,8 @@ class Product(Base):
     max_stock: Mapped[float] = mapped_column(Float, default=0.0)          # 最高库存预警
     barcode: Mapped[str] = mapped_column(String(100), default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    weather_sensitive: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # 是否受天气影响
+    weather_type: Mapped[list | None] = mapped_column(JSON, nullable=True)  # 影响类型: ["hot","rain"] 等
     remark: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
