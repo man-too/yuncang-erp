@@ -11,7 +11,7 @@
         <div v-for="(block, bi) in allBlocks" :key="bi" class="msg-block">
           <!-- 图表 -->
           <div v-if="block.type === 'chart'" class="chart-container">
-            <v-chart v-if="hasValidChartData(block)" :option="chartWithDefaultTitle(block)" autoresize style="height: 320px;" />
+            <v-chart v-if="hasValidChartData(block)" :option="chartWithDefaultTitle(block)" autoresize class="chart-render" />
             <el-empty v-else description="图表数据加载失败" :image-size="80" />
           </div>
 
@@ -271,15 +271,19 @@ function getCellClass(key: string, value: any): string {
 function hasValidChartData(block: MessageBlock): boolean {
   const data = block.data
   if (!data) return false
+  // Chart types with series (line, bar, pie, scatter, radar, gauge)
   if (data.series && Array.isArray(data.series) && data.series.length > 0) return true
+  // Heatmap: series exists but data is inside series[0].data as [x, y, value] tuples
+  if (data.series && Array.isArray(data.series) && data.series.length > 0 && data.series[0]?.data) return true
+  // Some charts have data directly in xAxis/yAxis without series (shouldn't render)
   return false
 }
 </script>
 
 <style scoped>
-.chat-message { display: flex; gap: 10px; max-width: 90%; }
-.chat-message.user { align-self: flex-end; flex-direction: row-reverse; }
-.chat-message.assistant { align-self: flex-start; }
+.chat-message { display: flex; gap: 10px; }
+.chat-message.user { align-self: flex-end; flex-direction: row-reverse; max-width: 75%; }
+.chat-message.assistant { align-self: flex-start; max-width: 95%; min-width: 320px; }
 
 .msg-avatar {
   width: 36px; height: 36px; border-radius: 50%; display: flex;
@@ -327,7 +331,18 @@ function hasValidChartData(block: MessageBlock): boolean {
   padding: 4px 12px; color: var(--text-secondary);
 }
 
-.chart-container { margin: 12px 0; background: var(--bg-card); border-radius: 8px; padding: 8px; }
+.chart-container {
+  margin: 12px 0;
+  background: var(--bg-card);
+  border-radius: 8px;
+  padding: 8px;
+  overflow: hidden;
+}
+.chart-render {
+  width: 100% !important;
+  height: 320px;
+  min-height: 280px;
+}
 .block-table {
   margin: 12px 0;
   border-radius: 8px;

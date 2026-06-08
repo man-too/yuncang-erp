@@ -63,7 +63,13 @@ function scrollToBottom() {
   })
 }
 
-watch(() => store.messages.length, scrollToBottom)
+watch(() => store.messages.length, () => {
+  scrollToBottom()
+  // Trigger chart resize after DOM update (scrollbar appearance may change width)
+  nextTick(() => {
+    window.dispatchEvent(new Event('resize'))
+  })
+})
 
 async function handleSend() {
   if (!inputText.value.trim() || store.isLoading) return
@@ -114,6 +120,7 @@ onMounted(() => {
 .chat-msgs {
   flex: 1; overflow-y: auto; padding: var(--spacing-lg);
   display: flex; flex-direction: column; gap: 14px;
+  scrollbar-gutter: stable;
 }
 .chat-input {
   padding: 12px var(--spacing-lg);

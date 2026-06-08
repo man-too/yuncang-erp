@@ -1,7 +1,7 @@
 /** AI 对话会话状态管理（仅会话内有效，刷新丢失） */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { aiApi, inventoryApi } from '@/api'
+import { aiApi } from '@/api'
 import { ElMessage } from 'element-plus'
 
 export interface ActionItem {
@@ -198,84 +198,10 @@ export const useChatStore = defineStore('chat', () => {
 
   async function fetchQuickActionBlocks(type: string): Promise<MessageBlock[]> {
     try {
-      if (type === 'stock_alert') {
-        const heatmapData: any = await inventoryApi.heatmap()
-        if (!heatmapData || heatmapData.length === 0) return []
-        const whNames: string[] = [...new Set(heatmapData.map((d: any) => d.warehouse_name))].filter(Boolean)
-        const prodNames: string[] = [...new Set(heatmapData.map((d: any) => d.product_name))].filter(Boolean)
-        const whIdx = Object.fromEntries(whNames.map((n, i) => [n, i]))
-        const prodIdx = Object.fromEntries(prodNames.map((n, i) => [n, i]))
-        const data = heatmapData.map((d: any) => [
-          whIdx[d.warehouse_name] ?? 0,
-          prodIdx[d.product_name] ?? 0,
-          d.alert_level ?? 0,
-        ])
-        return [{
-          type: 'chart', chartType: 'heatmap',
-          data: {
-            title: { text: '库存状态热力图', left: 'center', textStyle: { fontSize: 14 } },
-            tooltip: { position: 'top' },
-            grid: { left: 160, right: 40, top: 50, bottom: 50 },
-            xAxis: { type: 'category', data: whNames, splitArea: { show: true } },
-            yAxis: { type: 'category', data: prodNames, splitArea: { show: true } },
-            visualMap: { min: 0, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0,
-              inRange: { color: ['#e8f5e9', '#fff9c4', '#ffcc80', '#ef5350'] } },
-            series: [{ name: '库存状态', type: 'heatmap', data,
-              emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.5)' } } }],
-          },
-        }]
-      }
-      if (type === 'sales_forecast') {
-        const history: any = await aiApi.salesHistory()
-        const items = (history?.items || history || []).slice(0, 12)
-        if (items.length === 0) return []
-        const months = items.map((i: any) => i.date || i.month || '')
-        const amounts = items.map((i: any) => i.amount || i.total_amount || 0)
-
-        // WMA prediction: use last 3 months with weights [0.5, 0.3, 0.2] (most recent first)
-        const last3 = amounts.slice(-3)
-        const pred1 = last3.length >= 3
-          ? last3[2] * 0.5 + last3[1] * 0.3 + last3[0] * 0.2
-          : amounts[amounts.length - 1] || 0
-        const pred2 = pred1 * 0.5 + last3[2] * 0.3 + last3[1] * 0.2
-
-        // Generate forecast month labels — extract last numeric segment from month string
-        const lastMonth = months[months.length - 1] || ''
-        const monthNums = lastMonth.match(/\d+/g)
-        const lastMonthNum = monthNums ? parseInt(monthNums[monthNums.length - 1], 10) : 0
-        const predLabel1 = `${(lastMonthNum % 12) + 1}月(预)`
-        const predLabel2 = `${((lastMonthNum + 1) % 12) + 1}月(预)`
-
-        // Append forecast months and pad data for alignment
-        const allMonths = [...months, predLabel1, predLabel2]
-        const historicalData = [...amounts, null, null]
-        const forecastData = [...months.map(() => null), pred1, pred2]
-
-        return [{
-          type: 'chart', chartType: 'line',
-          data: {
-            title: { text: '月度销售趋势', left: 'center', textStyle: { fontSize: 14 } },
-            tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-            legend: { data: ['销售额', '预测'], bottom: 0 },
-            toolbox: { feature: { saveAsImage: {}, dataView: { readOnly: false }, restore: {} } },
-            dataZoom: [{ type: 'inside' }, { type: 'slider', bottom: 30 }],
-            grid: { left: 60, right: 30, top: 50, bottom: 80 },
-            xAxis: { type: 'category', data: allMonths },
-            yAxis: { type: 'value', name: '金额 (¥)' },
-            series: [{
-              name: '销售额', type: 'line', smooth: true, data: historicalData,
-              lineStyle: { color: '#5470c6', width: 2.5 },
-              areaStyle: { color: 'rgba(84,112,198,0.12)' },
-              emphasis: { scale: 1.8 },
-            }, {
-              name: '预测', type: 'line', smooth: true, data: forecastData,
-              lineStyle: { type: 'dashed', width: 2, color: '#ff6b6b' },
-              itemStyle: { color: '#ff6b6b' },
-              symbol: 'diamond',
-              symbolSize: 8,
-            }],
-          },
-        }]
+      // Use backend quick-chart API for all types — reliable, no LLM dependency
+      const res: any = await aiApi.quickChart(type)
+      if (res?.blocks && Array.isArray(res.blocks) && res.blocks.length > 0) {
+        return res.blocks.map((b: any) => normalizeBlock(b))
       }
       return []
     } catch {

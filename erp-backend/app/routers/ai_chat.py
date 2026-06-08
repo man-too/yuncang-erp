@@ -14,6 +14,47 @@ from app.tools import execute_tool
 
 router = APIRouter(prefix="/api/ai", tags=["AI 对话"])
 
+# 快捷操作 → 后端 render 工具映射
+QUICK_ACTION_TOOLS = {
+    "stock_alert": "render_inventory_heatmap",
+    "sales_forecast": "render_sales_trend",
+    "supplier_ranking": "render_supplier_ranking",
+    "dashboard": "render_comprehensive_diagnosis",
+    "purchase_advice": "render_purchase_advice",
+    "transfer_advice": "render_inventory_heatmap",  # 调拨基于库存热力图
+}
+
+
+@router.get("/quick-chart")
+def ai_quick_chart(
+    type: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """快捷操作直接获取图表 blocks，不经过 LLM"""
+    tool_name = QUICK_ACTION_TOOLS.get(type)
+    if not tool_name:
+        raise HTTPException(status_code=400, detail=f"不支持的快捷操作类型: {type}")
+
+    result = execute_tool(tool_name, {}, db)
+    if not result or "error" in result:
+        return {"blocks": []}
+
+    # render_* tools return either {"_render": True, "blocks": [...]} or a single block with _render
+    blocks = []
+    if isinstance(result, dict):
+        if result.get("_render"):
+            if "blocks" in result:
+                blocks = result["blocks"]
+            else:
+                # Single chart block (like render_sales_trend)
+                block = {k: v for k, v in result.items() if k != "_render"}
+                blocks = [block]
+        elif result.get("type") in ("chart", "table"):
+            blocks = [result]
+
+    return {"blocks": blocks}
+
 
 @router.post("/chat", response_model=ChatResponse)
 def ai_chat(

@@ -17,21 +17,24 @@ client = None
 if settings.OPENAI_API_KEY:
     client = OpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.AI_BASE_URL)
 
-SYSTEM_PROMPT = """你是供应链ERP系统的AI决策助手。你的核心能力是：用户问数据类问题→调工具查数据→用图表展示→文字分析。
+SYSTEM_PROMPT = """你是供应链ERP系统的AI决策助手。
 
-## 第一准则：有数据就有图表
-用户任何涉及数据的问题（销售、库存、供应商、产品、趋势、排名等），你必须：
-1. 调用工具获取数据（至少1个，推荐2-3个多维度）
-2. 在回复的 blocks 中用图表/表格展示数据
-3. 再用文字分析
+## 核心判断：用户意图识别
+根据用户的问题判断是否需要可视化：
+- **需要图表**：用户要求看"趋势"、"对比"、"分布"、"排名"、"概览"、"全局"等宏观分析 → 调用 render_* 工具获取图表
+- **只需文字**：用户问具体数值（"上个月销售额？"、"哪个产品卖得最好？"、"当前库存有多少？"）→ 调用 query_* 工具查数据，用文字直接回答，不需要画图
+- **需要行动**：用户要求"采购"、"补货"、"调拨" → 调用对应工具，给出 action block
 
-## 工具说明（重要：不要同时调用查询工具和同名渲染工具，避免重复图表）
-库存：调用 render_inventory_heatmap（含图表+表格），或 query_inventory（需要自己画图时）— 不要两个都调
-销售：调用 render_sales_trend（含图表+预测），或 query_sales_history + forecast_sales（需要自己画图时）
-供应商：调用 render_supplier_ranking（含图表+排名），或 query_suppliers / rank_suppliers — 不要重复
-综合诊断：只调 render_comprehensive_diagnosis
-采购建议：只调 render_purchase_advice 或 recommend_restock
-推荐：recommend_restock / recommend_supplier — 多维度推荐
+## 工具调用规则（极其重要，必须严格遵守）
+1. 每次只调用 ONE render_* 工具（如 render_inventory_heatmap），不要同时调用任何 query_* 或 analyze_* 工具——render_* 已经自带完整图表和表格数据
+2. 如果你只需要查数据回答具体问题，调用 query_inventory / query_sales_history / forecast_sales / query_suppliers / rank_suppliers 即可，不需要调 render_*
+3. 禁止以下组合（会导致重复图表）：
+   - render_inventory_heatmap + query_inventory 或 analyze_stock_risk
+   - render_sales_trend + query_sales_history 或 forecast_sales
+   - render_supplier_ranking + query_suppliers 或 rank_suppliers
+   - render_comprehensive_diagnosis + 任何其他查询工具
+   - render_purchase_advice + recommend_restock 或 query_inventory
+4. recommend_restock 和 recommend_supplier 只准备数据，不自带图表，可以配合使用但不要和 render_* 重复
 
 库存分析规则：当返回库存相关 blocks（图表或表格）时，必须在 content 中包含文字分析：
 1. 列出需补货的产品及建议补货量
@@ -71,8 +74,8 @@ blocks 是可选的结构化内容数组，每个元素可以是：
 {"type": "actions", "actions": [{"label": "按钮文字", "action": "create_purchase_order|create_stock_transfer", "params": {...}, "confirmTitle": "确认标题", "confirmDetail": "详细描述"}]}
 
 ## 行为准则
-- 用户问数据类问题时，先调用工具获取最新数据再回答
-- 用图表直观展示数据趋势和对比
+- 用户问具体数值或事实时，调 query_* 查数据后直接用文字回答，不需要图表
+- 用户要求趋势分析、全局概览、对比排名时，调 render_* 获取图表
 - 当分析结果表明需要补货时，给出具体的采购建议并附带操作按钮
 - 当发现仓库间库存不均衡时，给出调拨建议并附带操作按钮
 - 对于跨领域问题（如"低库存产品的供应商表现如何"），依次调用多个工具再综合分析
@@ -375,7 +378,7 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
     if any(kw in user_msg for kw in data_keywords):
         full_messages.insert(1, {
             "role": "system",
-            "content": "用户问的是业务数据问题，你必须调用合适的工具来查询真实数据，不能只靠自己的知识回答。查询到数据后在blocks中用图表展示。",
+            "content": "用户问的是业务数据问题，你必须调用合适的工具来查询真实数据，不能只靠自己的知识回答。注意：根据用户意图选择工具——如果用户要求看趋势/对比/概览，调 render_* 获取图表；如果用户只问具体数值，调 query_* 用文字回答即可。",
         })
 
     try:
@@ -581,23 +584,61 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
 
 
 def _dedup_chart_blocks(blocks: list) -> list:
-    """去除重复的 chart block（相同 title 的图表只保留第一个）"""
+    """去除重复的 chart block：
+    1. 相同 title 的图表只保留第一个
+    2. 相同语义域的图表只保留第一个（如"库存状态热力图"和"库存分布"都是库存域）
+    """
+    # Semantic domain groups: keywords → domain name
+    DOMAIN_KEYWORDS = {
+        "库存": ["库存", "库存量", "低库存", "热力图", "缺货", "补货"],
+        "销售": ["销售", "销量", "销售额", "趋势", "预测", "月度"],
+        "供应商": ["供应商", "评分", "排名", "对比"],
+        "综合": ["综合", "健康", "诊断", "仪表盘", "雷达"],
+        "采购": ["采购", "建议采购", "补货量", "费用"],
+    }
+
+    def _title_of(b: dict) -> str:
+        data = b.get("data", {})
+        if not isinstance(data, dict):
+            return ""
+        t = data.get("title")
+        if isinstance(t, dict):
+            return t.get("text", "")
+        if isinstance(t, str):
+            return t
+        return ""
+
+    def _domain_of(title: str) -> str | None:
+        """Map a chart title to its semantic domain"""
+        for domain, keywords in DOMAIN_KEYWORDS.items():
+            if any(kw in title for kw in keywords):
+                return domain
+        return None
+
     seen_titles = set()
+    seen_domains = set()
     result = []
     for b in blocks:
-        if b.get("type") == "chart":
-            data = b.get("data", {})
-            title = ""
-            if isinstance(data, dict):
-                t = data.get("title")
-                if isinstance(t, dict):
-                    title = t.get("text", "")
-                elif isinstance(t, str):
-                    title = t
-            if title and title in seen_titles:
-                continue
-            seen_titles.add(title)
+        if b.get("type") != "chart":
+            result.append(b)
+            continue
+
+        title = _title_of(b)
+        domain = _domain_of(title)
+
+        # Dedup by exact title
+        if title and title in seen_titles:
+            continue
+
+        # Dedup by semantic domain (e.g. two different inventory charts)
+        if domain and domain in seen_domains:
+            continue
+
+        seen_titles.add(title)
+        if domain:
+            seen_domains.add(domain)
         result.append(b)
+
     return result
 
 

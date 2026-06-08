@@ -40,7 +40,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "recommend_restock",
-            "description": "综合库存水位、近30天销量、供应商交期等多维度数据，智能推荐补货清单和补货量。使用时建议先分别调用 query_inventory 和 query_sales_history 获取基础数据",
+            "description": "综合库存水位、近30天销量、供应商交期等多维度数据，智能推荐补货清单和补货量。独立使用，不需要额外调用 query_inventory 或 query_sales_history",
             "parameters": {
                 "type": "object",
                 "properties": {
