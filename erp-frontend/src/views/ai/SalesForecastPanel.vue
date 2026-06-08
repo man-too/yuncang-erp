@@ -279,7 +279,7 @@ const loadProductData = async () => {
       const diff = Math.ceil((dateRange.value[1] - dateRange.value[0]) / (1000 * 60 * 60 * 24))
       params.days = diff
     }
-    productDailyData.value = (await aiApi.salesHistory(params)) || []
+    productDailyData.value = (await aiApi.salesHistory(params) as any) || []
 
     // LLM prediction
     try {

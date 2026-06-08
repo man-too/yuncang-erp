@@ -24,121 +24,180 @@
       <el-empty v-else description="点击「刷新排名」获取 AI 供应商排名" :image-size="60" />
     </div>
 
-    <!-- Section 2: Product Supplier Selection -->
-    <div class="selection-section">
+    <!-- Section 2: Supplier Bar Chart Comparison -->
+    <div v-if="scoreData.length > 0" class="chart-section">
       <div class="section-row">
-        <span class="section-title">供应商匹配</span>
-        <span class="section-hint">为每个产品选择最优供应商</span>
+        <span class="section-title">供应商评分对比</span>
+      </div>
+      <div v-loading="chartLoading" class="chart-area">
+        <v-chart v-if="supplierChartOption" :option="supplierChartOption" autoresize style="height: 280px;" />
+        <el-empty v-else description="暂无供应商数据" :image-size="60" />
+      </div>
+    </div>
+
+    <!-- Section 3: Product-Supplier Allocation -->
+    <div class="allocation-section">
+      <div class="section-row">
+        <span class="section-title">供应商匹配与数量分配</span>
+        <span class="section-hint">为每个产品选择供应商并分配采购数量</span>
       </div>
 
-      <!-- Product Picker -->
-      <div class="picker-row">
-        <span class="picker-label">选择产品：</span>
-        <el-select
-          v-model="activeProductId"
-          placeholder="请选择产品"
-          filterable
-          style="width: 360px;"
-          @change="onProductChange"
+      <div v-if="store.allProducts.length === 0" class="empty-hint">
+        暂无产品，请先在库存分析步骤添加补货产品
+      </div>
+
+      <div v-else class="product-allocation-list">
+        <el-card
+          v-for="product in store.allProducts"
+          :key="product.product_id"
+          class="product-card"
+          shadow="hover"
         >
-          <el-option
-            v-for="p in store.allProducts"
-            :key="p.product_id"
-            :label="`${p.product_name} (${p.product_code || '无编码'})`"
-            :value="p.product_id"
+          <!-- Product Header -->
+          <div class="product-header">
+            <div class="product-info">
+              <span class="product-name">{{ product.product_name }}</span>
+              <span class="product-code">{{ product.product_code }}</span>
+              <el-tag size="small" type="info">{{ product.warehouse_name }}</el-tag>
+            </div>
+            <div class="product-qty-info">
+              <span class="qty-label">需采购量:</span>
+              <span class="qty-value">{{ getNeededQty(product) }} {{ product.unit }}</span>
+              <el-tag
+                :type="allocationStatus(product.product_id).type"
+                size="small"
+                style="margin-left: 8px;"
+              >
+                已分配: {{ allocatedQty(product.product_id) }}/{{ getNeededQty(product) }} {{ product.unit }}
+              </el-tag>
+            </div>
+          </div>
+
+          <!-- Allocation Warning -->
+          <el-alert
+            v-if="allocationStatus(product.product_id).over"
+            type="error"
+            :closable="false"
+            show-icon
+            style="margin-bottom: 10px;"
           >
-            <span>{{ p.product_name }}</span>
-            <span style="float: right; color: var(--text-secondary); font-size: 12px;">{{ p.warehouse_name }}</span>
-          </el-option>
-        </el-select>
-        <el-tag v-if="activeProductId && store.supplierChoices[activeProductId]?.length" type="success" size="small" style="margin-left: 12px;">
-          已选：{{ store.supplierChoices[activeProductId].map(getSupplierName).join('、') }}
-        </el-tag>
-        <el-tag v-else-if="activeProductId" type="info" size="small" style="margin-left: 12px;">未选择供应商</el-tag>
-      </div>
+            <template #default>
+              分配总量 ({{ allocatedQty(product.product_id) }}) 超过需采购量 ({{ getNeededQtyById(product.product_id) }})
+            </template>
+          </el-alert>
 
-      <!-- Chart + Table (shown when a product is selected) -->
-      <div v-if="activeProductId" class="match-area">
-        <!-- Bar Chart -->
-        <div v-loading="chartLoading" class="chart-area">
-          <v-chart v-if="supplierChartOption" :option="supplierChartOption" autoresize style="height: 280px;" />
-          <el-empty v-else description="暂无供应商数据" :image-size="60" />
-        </div>
-
-        <!-- Supplier Table with Radio -->
-        <div class="table-area">
+          <!-- Supplier Allocation Table -->
           <el-table
-            :data="rankedSuppliers"
-            stripe
+            :data="getProductSuppliers(product.product_id)"
             size="small"
+            stripe
             border
-            max-height="260"
+            max-height="240"
+            style="width: 100%;"
           >
             <el-table-column width="50" align="center">
               <template #default="{ row }">
                 <el-checkbox
-                  :model-value="(store.supplierChoices[activeProductId!] || []).includes(row.id)"
-                  @change="onSupplierToggle(row, $event)"
+                  :model-value="isSupplierChecked(product.product_id, row.supplier_id)"
+                  @change="onSupplierToggle(product.product_id, row.supplier_id, $event)"
                 />
               </template>
             </el-table-column>
-            <el-table-column type="index" label="排名" width="55" align="center" />
-            <el-table-column prop="name" label="供应商名称" min-width="130" />
-            <el-table-column prop="rating" label="综合评分" width="90" align="right" sortable>
+            <el-table-column prop="supplier_name" label="供应商名称" min-width="130" show-overflow-tooltip />
+            <el-table-column label="综合评分" width="90" align="center" sortable :sort-method="sortByScore">
               <template #default="{ row }">
-                <el-tag :type="row.rating >= 4 ? 'success' : row.rating >= 3 ? 'warning' : 'danger'" size="small">
-                  {{ row.rating }}
+                <el-tag
+                  :type="row.total_score >= 80 ? 'success' : row.total_score >= 60 ? 'warning' : 'danger'"
+                  size="small"
+                >
+                  {{ row.total_score }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="lead_time" label="交期(天)" width="85" align="right" />
-            <el-table-column prop="delivery_rate" label="交付率" width="80" align="right">
+            <el-table-column label="风险" width="100" align="center">
               <template #default="{ row }">
-                {{ row.delivery_rate != null ? row.delivery_rate + '%' : '暂无' }}
+                <el-tooltip
+                  v-if="row.is_single_source"
+                  content="单源依赖：该供应商独家供应部分产品，建议开发备选供应商"
+                  placement="top"
+                >
+                  <el-tag type="danger" size="small">单源风险</el-tag>
+                </el-tooltip>
+                <el-tooltip
+                  v-if="row.risk_penalty > 0"
+                  :content="`风险扣分: ${row.risk_penalty} (单源: ${row.single_source_penalty}, 交付波动: ${row.delay_std_penalty})`"
+                  placement="top"
+                >
+                  <el-tag type="warning" size="small">-{{ row.risk_penalty }}</el-tag>
+                </el-tooltip>
+                <span v-if="!row.is_single_source && row.risk_penalty === 0" style="color: #67c23a; font-size: 12px;">低风险</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="交付评分" width="85" align="center">
+              <template #default="{ row }">
+                {{ row.delivery ?? '—' }}
+              </template>
+            </el-table-column>
+            <el-table-column label="建议分配" width="100" align="center">
+              <template #default="{ row }">
+                <span class="suggested-qty">{{ getSuggestedAllocation(product.product_id, row) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="实际分配" width="160" align="center">
+              <template #default="{ row }">
+                <el-input-number
+                  v-if="isSupplierChecked(product.product_id, row.supplier_id)"
+                  :model-value="getAllocatedQty(product.product_id, row.supplier_id)"
+                  :min="0"
+                  :max="getNeededQty(product)"
+                  :step="1"
+                  size="small"
+                  controls-position="right"
+                  style="width: 130px;"
+                  @change="onAllocationChange(product.product_id, row.supplier_id, $event)"
+                />
+                <span v-else style="color: #c0c4cc; font-size: 12px;">—</span>
               </template>
             </el-table-column>
           </el-table>
-        </div>
+        </el-card>
       </div>
-      <el-empty v-else description="请选择产品以匹配供应商" :image-size="60" />
     </div>
 
-    <!-- Section 3: Selected Suppliers Summary & Navigation -->
+    <!-- Section 4: Allocation Summary & Navigation -->
     <div class="summary-section">
       <div class="section-row">
-        <span class="section-title">已选供应商汇总</span>
-        <span class="section-count">{{ chosenCount }} / {{ store.allProducts.length }} 已匹配</span>
+        <span class="section-title">分配汇总</span>
+        <span class="section-count">{{ fullyAllocatedCount }} / {{ store.allProducts.length }} 已全部分配</span>
       </div>
 
-      <div class="tag-area">
+      <div class="summary-tags">
         <template v-if="store.allProducts.length === 0">
-          <span class="empty-hint">暂无产品，请先在上一步选择补货产品</span>
+          <span class="empty-hint">暂无产品</span>
         </template>
         <template v-else>
           <el-tag
             v-for="p in store.allProducts"
             :key="p.product_id"
-            :type="store.supplierChoices[p.product_id]?.length ? 'success' : 'info'"
+            :type="allocationStatus(p.product_id).type"
             size="default"
-            closable
-            class="choice-tag"
-            @close="clearChoice(p.product_id)"
-            @click="activeProductId = p.product_id"
+            class="summary-tag"
           >
-            {{ p.product_name }} →
-            {{ (store.supplierChoices[p.product_id] || []).map(getSupplierName).join('、') || '未选' }}
+            {{ p.product_name }}:
+            {{ allocatedQty(p.product_id) }}/{{ getNeededQty(p) }} {{ p.unit }}
+            <template v-if="allocationStatus(p.product_id).over"> (超出!)</template>
           </el-tag>
         </template>
       </div>
 
       <div class="nav-row">
-        <el-button @click="store.prevStep()">上一步</el-button>
+        <el-button @click="store.prevStep()">上一步：库存分析</el-button>
         <el-button
           type="primary"
-          :disabled="!allProductsMatched"
+          :disabled="!canProceed"
           @click="handleNextStep"
         >
-          下一步：销量预测 →
+          下一步：风险审核 →
         </el-button>
       </div>
     </div>
@@ -155,6 +214,7 @@ import { GridComponent, TooltipComponent, LegendComponent, TitleComponent } from
 import { ElMessage } from 'element-plus'
 import { usePurchaseDecisionStore } from '@/stores/purchaseDecision'
 import { aiApi, supplierApi } from '@/api'
+import type { RestockItem } from '@/stores/purchaseDecision'
 
 use([CanvasRenderer, BarChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent])
 
@@ -163,27 +223,17 @@ const store = usePurchaseDecisionStore()
 // ---- State ----
 const rankingLoading = ref(false)
 const chartLoading = ref(false)
-const rankedSuppliers = ref<any[]>([])
 const aiAnalysis = ref<any>(null)
-const activeProductId = ref<number | null>(null)
 const supplierList = ref<any[]>([])
+// Score data from /ai/supplier-score — array of { supplier_id, supplier_name, total_score, delivery, risk_penalty, is_single_source, ... }
+const scoreData = ref<any[]>([])
 
-// ---- Computed ----
-const chosenCount = computed(() =>
-  Object.keys(store.supplierChoices).filter(
-    id => store.allProducts.some(p => p.product_id === Number(id)) && store.supplierChoices[Number(id)]?.length > 0
-  ).length
-)
-
-const allProductsMatched = computed(() => {
-  if (store.allProducts.length === 0) return false
-  return store.allProducts.every(p => store.supplierChoices[p.product_id]?.length > 0)
-})
-
+// ---- Computed: Chart ----
 const supplierChartOption = computed(() => {
-  if (!rankedSuppliers.value.length) return null
-  const names = rankedSuppliers.value.map((s: any) => s.name)
-  const ratings = rankedSuppliers.value.map((s: any) => s.rating || 0)
+  if (!scoreData.value.length) return null
+  const names = scoreData.value.map((s: any) => s.supplier_name || `供应商#${s.supplier_id}`)
+  const scores = scoreData.value.map((s: any) => s.total_score || 0)
+  const penalties = scoreData.value.map((s: any) => s.risk_penalty || 0)
   return {
     tooltip: { trigger: 'axis' },
     title: {
@@ -191,44 +241,94 @@ const supplierChartOption = computed(() => {
       left: 'center',
       textStyle: { fontSize: 14, fontWeight: 'bold' },
     },
-    grid: { left: 60, right: 30, top: 50, bottom: 40 },
+    legend: { top: 30, data: ['综合评分', '风险扣分'] },
+    grid: { left: 60, right: 30, top: 60, bottom: 40 },
     xAxis: {
       type: 'category',
       data: names,
       axisLabel: { fontSize: 11, rotate: names.length > 6 ? 30 : 0 },
     },
-    yAxis: { type: 'value', name: '评分', min: 0, max: 5 },
-    series: [{
-      type: 'bar',
-      barMaxWidth: 40,
-      data: ratings.map((v: number) => ({
-        value: v,
-        itemStyle: {
-          color: v >= 4 ? '#2D8C4A' : v >= 3 ? '#F27A00' : '#C53030',
-        },
-      })),
-      label: { show: true, position: 'top', formatter: '{c}' },
-    }],
+    yAxis: { type: 'value', name: '评分', min: 0 },
+    series: [
+      {
+        name: '综合评分',
+        type: 'bar',
+        barMaxWidth: 40,
+        data: scores.map((v: number) => ({
+          value: v,
+          itemStyle: {
+            color: v >= 80 ? '#2D8C4A' : v >= 60 ? '#F27A00' : '#C53030',
+          },
+        })),
+        label: { show: true, position: 'top', formatter: '{c}' },
+      },
+      {
+        name: '风险扣分',
+        type: 'bar',
+        barMaxWidth: 40,
+        data: penalties,
+        itemStyle: { color: '#E6A23C' },
+        label: { show: true, position: 'top', formatter: (p: any) => p.value > 0 ? `-${p.value}` : '' },
+      },
+    ],
   }
 })
 
-// ---- Methods ----
-function getSupplierName(id: number | undefined): string {
-  if (!id) return ''
-  const s = supplierList.value.find((s: any) => s.id === id)
-  return s ? s.name : `供应商#${id}`
-}
+// ---- Computed: Allocation Status ----
+const fullyAllocatedCount = computed(() =>
+  store.allProducts.filter(p => {
+    const needed = getNeededQty(p)
+    const allocated = allocatedQty(p.product_id)
+    return allocated === needed && needed > 0
+  }).length
+)
 
+const canProceed = computed(() => {
+  if (store.allProducts.length === 0) return false
+  return store.allProducts.every(p => {
+    const needed = getNeededQty(p)
+    const allocated = allocatedQty(p.product_id)
+    // Must have at least one supplier checked and allocation must not exceed needed
+    const hasSupplier = (store.supplierChoices[p.product_id] || []).length > 0
+    return hasSupplier && allocated > 0 && allocated <= needed
+  })
+})
+
+// ---- Methods: Data Fetching ----
 async function fetchRanking() {
   rankingLoading.value = true
   try {
     const res: any = await aiApi.supplierRanking()
-    rankedSuppliers.value = res?.suppliers || []
     aiAnalysis.value = res?.ai_analysis || null
   } catch {
     ElMessage.warning('供应商排名获取失败')
   } finally {
     rankingLoading.value = false
+  }
+}
+
+async function fetchSupplierScores() {
+  chartLoading.value = true
+  try {
+    // Fetch all supplier scores (no filter) to populate the allocation tables
+    const res: any = await aiApi.supplierScore({})
+    scoreData.value = res?.suppliers || []
+    // Cache supplier info into store
+    for (const s of scoreData.value) {
+      store.supplierInfo[s.supplier_id] = {
+        id: s.supplier_id,
+        name: s.supplier_name,
+        total_score: s.total_score,
+        delivery: s.delivery,
+        risk_penalty: s.risk_penalty,
+        is_single_source: s.is_single_source,
+        suggested_share: s.suggested_share,
+      }
+    }
+  } catch {
+    scoreData.value = []
+  } finally {
+    chartLoading.value = false
   }
 }
 
@@ -241,39 +341,120 @@ async function fetchSuppliers() {
   }
 }
 
-function onProductChange(_productId: number) {
-  // Chart and table use the global rankedSuppliers which is already loaded
+// ---- Methods: Product Needed Qty ----
+function getNeededQty(product: RestockItem): number {
+  // Priority: suggestedQtys from ROP > suggested_qty from store > quantities
+  const pid = product.product_id
+  const ropData = store.suggestedQtys[pid]
+  if (ropData && ropData.suggested_qty) return ropData.suggested_qty
+  if (store.quantities[pid] && store.quantities[pid] > 0) return store.quantities[pid]
+  return product.suggested_qty || 0
 }
 
-function onSupplierToggle(supplier: any, checked: boolean) {
-  if (!activeProductId.value) return
-  if (!store.supplierChoices[activeProductId.value]) {
-    store.supplierChoices[activeProductId.value] = []
+// ---- Methods: Supplier List per Product ----
+function getProductSuppliers(_productId: number): any[] {
+  // All suppliers with score data are available for every product
+  // In a more advanced version, we could filter by product-supplier relationship
+  return scoreData.value
+}
+
+// ---- Methods: Allocation ----
+function isSupplierChecked(productId: number, supplierId: number): boolean {
+  return (store.supplierChoices[productId] || []).includes(supplierId)
+}
+
+function getAllocatedQty(productId: number, supplierId: number): number {
+  return store.supplierQuantities[productId]?.[supplierId] || 0
+}
+
+function allocatedQty(productId: number): number {
+  const alloc = store.supplierQuantities[productId]
+  if (!alloc) return 0
+  return Object.values(alloc).reduce((sum, v) => sum + v, 0)
+}
+
+function allocationStatus(productId: number): { type: string; over: boolean } {
+  const needed = getNeededQtyById(productId)
+  const allocated = allocatedQty(productId)
+  if (allocated > needed) return { type: 'danger', over: true }
+  if (allocated === needed && needed > 0) return { type: 'success', over: false }
+  if (allocated > 0) return { type: 'warning', over: false }
+  return { type: 'info', over: false }
+}
+
+function getNeededQtyById(productId: number): number {
+  const product = store.allProducts.find(p => p.product_id === productId)
+  if (!product) return 0
+  return getNeededQty(product)
+}
+
+// ---- Methods: Suggested Allocation ----
+function getSuggestedAllocation(productId: number, supplier: any): number {
+  const needed = getNeededQtyById(productId)
+  if (needed <= 0) return 0
+
+  // Calculate allocation by delivery score proportion among all checked suppliers
+  const checkedSuppliers = (store.supplierChoices[productId] || [])
+  if (checkedSuppliers.length === 0) {
+    // If no suppliers checked yet, suggest based on this supplier's delivery score vs total
+    const totalDelivery = scoreData.value.reduce((sum, s) => sum + (s.delivery || 0), 0)
+    if (totalDelivery <= 0) return 0
+    return Math.round(needed * ((supplier.delivery || 0) / totalDelivery))
   }
-  const list = store.supplierChoices[activeProductId.value]
+
+  // Only among checked suppliers
+  const checkedScoreData = scoreData.value.filter(s => checkedSuppliers.includes(s.supplier_id))
+  const totalDelivery = checkedScoreData.reduce((sum, s) => sum + (s.delivery || 0), 0)
+  if (totalDelivery <= 0) return 0
+
+  const proportion = (supplier.delivery || 0) / totalDelivery
+  return Math.round(needed * proportion)
+}
+
+// ---- Methods: User Actions ----
+function onSupplierToggle(productId: number, supplierId: number, checked: boolean) {
+  if (!store.supplierChoices[productId]) {
+    store.supplierChoices[productId] = []
+  }
+  const list = store.supplierChoices[productId]
   if (checked) {
-    if (!list.includes(supplier.id)) list.push(supplier.id)
-    // Derive forecast price from supplier info if available
-    const s = supplierList.value.find((s: any) => s.id === supplier.id)
-    if (s && s.unit_price != null) {
-      store.forecastPrices[activeProductId.value] = s.unit_price
+    if (!list.includes(supplierId)) list.push(supplierId)
+    // Auto-fill suggested allocation
+    const supplier = scoreData.value.find(s => s.supplier_id === supplierId)
+    if (supplier) {
+      const suggested = getSuggestedAllocation(productId, supplier)
+      if (suggested > 0) {
+        if (!store.supplierQuantities[productId]) {
+          store.supplierQuantities[productId] = {}
+        }
+        store.supplierQuantities[productId][supplierId] = suggested
+      }
     }
-    // Cache supplier info
-    store.supplierInfo[supplier.id] = supplier
   } else {
-    const idx = list.indexOf(supplier.id)
+    const idx = list.indexOf(supplierId)
     if (idx !== -1) list.splice(idx, 1)
+    // Clear allocation for this supplier
+    if (store.supplierQuantities[productId]) {
+      delete store.supplierQuantities[productId][supplierId]
+    }
   }
 }
 
-function clearChoice(productId: number) {
-  store.supplierChoices[productId] = []
-  delete store.forecastPrices[productId]
+function onAllocationChange(productId: number, supplierId: number, value: number | null) {
+  const qty = value || 0
+  if (!store.supplierQuantities[productId]) {
+    store.supplierQuantities[productId] = {}
+  }
+  store.supplierQuantities[productId][supplierId] = qty
+}
+
+function sortByScore(a: any, b: any): number {
+  return (a.total_score || 0) - (b.total_score || 0)
 }
 
 function handleNextStep() {
-  if (!allProductsMatched.value) {
-    ElMessage.warning('请为所有产品选择供应商')
+  if (!canProceed.value) {
+    ElMessage.warning('请为所有产品选择供应商并完成数量分配')
     return
   }
   store.nextStep()
@@ -281,10 +462,38 @@ function handleNextStep() {
 
 // ---- Lifecycle ----
 onMounted(async () => {
-  await Promise.all([fetchRanking(), fetchSuppliers()])
-  // Auto-select first product if any exist
-  if (store.allProducts.length > 0) {
-    activeProductId.value = store.allProducts[0].product_id
+  await Promise.all([fetchRanking(), fetchSuppliers(), fetchSupplierScores()])
+  // Auto-suggest allocations for products that have no allocations yet
+  for (const product of store.allProducts) {
+    if (!store.supplierChoices[product.product_id] || store.supplierChoices[product.product_id].length === 0) {
+      // Auto-select top 2 suppliers by total_score
+      const topSuppliers = scoreData.value
+        .filter(s => !s.is_single_source || scoreData.value.length <= 2)
+        .slice(0, 2)
+      if (topSuppliers.length > 0) {
+        store.supplierChoices[product.product_id] = topSuppliers.map(s => s.supplier_id)
+        // Auto-allocate by delivery score proportion
+        const needed = getNeededQty(product)
+        if (needed > 0) {
+          const totalDelivery = topSuppliers.reduce((sum, s) => sum + (s.delivery || 0), 0)
+          if (totalDelivery > 0) {
+            store.supplierQuantities[product.product_id] = {}
+            for (const s of topSuppliers) {
+              const proportion = (s.delivery || 0) / totalDelivery
+              store.supplierQuantities[product.product_id][s.supplier_id] = Math.round(needed * proportion)
+            }
+            // Fix rounding: ensure total matches needed
+            const allocated = allocatedQty(product.product_id)
+            if (allocated !== needed && topSuppliers.length > 0) {
+              const diff = needed - allocated
+              // Add/subtract diff from the top supplier
+              const topId = topSuppliers[0].supplier_id
+              store.supplierQuantities[product.product_id][topId] = (store.supplierQuantities[product.product_id][topId] || 0) + diff
+            }
+          }
+        }
+      }
+    }
   }
 })
 </script>
@@ -367,30 +576,14 @@ onMounted(async () => {
   align-items: center;
 }
 
-/* Section 2: Selection */
-.selection-section {
+/* Section 2: Chart */
+.chart-section {
   border: 1px solid var(--border-light);
   border-radius: 8px;
   padding: 16px 20px;
   background: #fff;
 }
-.picker-row {
-  display: flex;
-  align-items: center;
-  margin-bottom: 16px;
-}
-.picker-label {
-  font-size: 14px;
-  color: #606266;
-  margin-right: 10px;
-  white-space: nowrap;
-}
-.match-area {
-  display: flex;
-  gap: 20px;
-}
 .chart-area {
-  flex: 1;
   min-height: 280px;
   border: 1px solid var(--border-light);
   border-radius: 8px;
@@ -400,19 +593,75 @@ onMounted(async () => {
   align-items: center;
   justify-content: center;
 }
-.table-area {
-  flex: 1;
-  min-width: 400px;
+
+/* Section 3: Allocation */
+.allocation-section {
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 16px 20px;
+  background: #fff;
+}
+.product-allocation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.product-card {
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+}
+.product-card :deep(.el-card__body) {
+  padding: 14px 16px;
+}
+.product-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.product-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.product-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.product-code {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.product-qty-info {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.qty-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.qty-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.suggested-qty {
+  font-size: 12px;
+  color: #909399;
 }
 
-/* Section 3: Summary */
+/* Section 4: Summary */
 .summary-section {
   border: 1px solid var(--border-light);
   border-radius: 8px;
   padding: 16px 20px;
   background: #fff;
 }
-.tag-area {
+.summary-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -420,8 +669,8 @@ onMounted(async () => {
   margin-bottom: 16px;
   align-items: center;
 }
-.choice-tag {
-  cursor: pointer;
+.summary-tag {
+  cursor: default;
 }
 .empty-hint {
   color: var(--text-secondary);

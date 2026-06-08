@@ -72,7 +72,7 @@
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="row.status === 'active' ? 'success' : row.status === 'inactive' ? 'info' : 'warning'">
-              {{ { active: '启用', inactive: '停用', pending: '待审核', blacklisted: '黑名单' }[row.status] || row.status }}
+              {{ ({ active: '启用', inactive: '停用', pending: '待审核', blacklisted: '黑名单' } as Record<string, string>)[row.status] || row.status }}
             </el-tag>
           </template>
         </el-table-column>

@@ -292,8 +292,8 @@ const handleResolve = async (id: number) => {
 onMounted(async () => {
   fetchStock()
   fetchAlerts()
-  warehouses.value = (await inventoryApi.warehouses.list()) || []
-  categories.value = (await productApi.categories.list()) || []
+  warehouses.value = (await inventoryApi.warehouses.list() as any) || []
+  categories.value = (await productApi.categories.list() as any) || []
 })
 </script>
 

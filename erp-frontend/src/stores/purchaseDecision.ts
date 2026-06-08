@@ -55,7 +55,16 @@ export const usePurchaseDecisionStore = defineStore('purchaseDecision', () => {
     allProducts.value.filter(p => selectedIds.value.has(p.product_id))
   )
 
-  const stepLabels = ['库存分析', '风险评估', '供应商匹配', '销量预测', '汇总确认']
+  const stepLabels = ['库存分析', '供应商匹配', '风险审核', '汇总确认']
+
+  // Phase 3: ROP 建议采购量（product_id → ROP 计算结果）
+  const suggestedQtys = ref<Record<number, any>>({})
+  // Phase 3: 供应商数量分配（product_id → supplier_id → quantity）
+  const supplierQuantities = ref<Record<number, Record<number, number>>>({})
+  // Phase 3: 库存 KPI 数据
+  const inventoryKpi = ref<any>(null)
+  // Phase 3: 风险审核结果
+  const auditResult = ref<any>(null)
 
   async function fetchLowStockProducts() {
     isLoading.value = true
@@ -176,7 +185,7 @@ export const usePurchaseDecisionStore = defineStore('purchaseDecision', () => {
   }
 
   function nextStep() {
-    if (currentStep.value < 4) currentStep.value++
+    if (currentStep.value < 3) currentStep.value++
   }
 
   function prevStep() {
@@ -194,6 +203,11 @@ export const usePurchaseDecisionStore = defineStore('purchaseDecision', () => {
     forecastPrices.value = {}
     forecastQuantities.value = {}
     purchasePlan.value = null
+    // Phase 3: 重置新增状态
+    suggestedQtys.value = {}
+    supplierQuantities.value = {}
+    inventoryKpi.value = null
+    auditResult.value = null
   }
 
   function close() {
@@ -201,13 +215,88 @@ export const usePurchaseDecisionStore = defineStore('purchaseDecision', () => {
     reset()
   }
 
+  // Phase 3: 获取 ROP 建议采购量
+  async function fetchSuggestedQty(productId: number, supplierId?: number) {
+    try {
+      const res: any = await aiApi.suggestedQty({ product_id: productId, supplier_id: supplierId })
+      if (res) {
+        suggestedQtys.value[productId] = res
+      }
+      return res
+    } catch (e) {
+      console.error('fetchSuggestedQty error:', e)
+      return null
+    }
+  }
+
+  // Phase 3: 获取库存 KPI
+  async function fetchInventoryKpi() {
+    try {
+      const res: any = await aiApi.inventoryKpi()
+      if (res) {
+        inventoryKpi.value = res
+      }
+      return res
+    } catch (e) {
+      console.error('fetchInventoryKpi error:', e)
+      return null
+    }
+  }
+
+  // Phase 3: 获取供应商综合评分
+  async function fetchSupplierScore(supplierIds?: number[]) {
+    try {
+      const res: any = await aiApi.supplierScore({ supplier_ids: supplierIds })
+      return res
+    } catch (e) {
+      console.error('fetchSupplierScore error:', e)
+      return null
+    }
+  }
+
+  // Phase 3: 采购计划风险审核
+  async function fetchAuditPlan() {
+    const items = selectedProducts.value.map(p => {
+      const supplierId = supplierChoices.value[p.product_id]?.[0]
+      const supplierName = supplierId ? (supplierInfo.value[supplierId]?.name || `供应商#${supplierId}`) : ''
+      const qty = quantities.value[p.product_id] || p.suggested_qty || 0
+      return {
+        product_id: p.product_id,
+        product_name: p.product_name,
+        quantity: qty,
+        supplier_id: supplierId || 0,
+        supplier_name: supplierName,
+      }
+    }).filter(item => item.supplier_id > 0 && item.quantity > 0)
+
+    if (items.length === 0) {
+      ElMessage.warning('请先完成供应商匹配和数量设置')
+      return null
+    }
+
+    try {
+      const res: any = await aiApi.auditPlan({ items })
+      if (res) {
+        auditResult.value = res
+      }
+      return res
+    } catch (e) {
+      console.error('fetchAuditPlan error:', e)
+      return null
+    }
+  }
+
   return {
     currentStep, isExpanded, isLoading,
     allProducts, selectedIds, quantities, aiRecommendation,
     riskResults, supplierChoices, supplierInfo, forecastPrices, forecastQuantities,
     purchasePlan, selectedProducts, stepLabels,
+    // Phase 3: 新增状态
+    suggestedQtys, supplierQuantities, inventoryKpi, auditResult,
     fetchLowStockProducts, getRecommendation,
     toggleProduct, selectAll, deselectAll, addToProducts, removeSelected, removeProduct, updateProduct, setQuantity,
     nextStep, prevStep, reset, close,
+    // Phase 3: 新增 actions
+    fetchSuggestedQty, fetchInventoryKpi, fetchSupplierScore, fetchAuditPlan,
   }
 })

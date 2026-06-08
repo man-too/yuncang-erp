@@ -104,7 +104,7 @@ const loadData = async () => {
   try {
     const params: any = {}
     if (filterSupplierId.value) params.supplier_id = filterSupplierId.value
-    analysisData.value = (await aiApi.supplierAnalysis(params)) || []
+    analysisData.value = (await aiApi.supplierAnalysis(params) as any) || []
     const rankRes: any = await aiApi.supplierRanking()
     rankingData.value = rankRes.suppliers || []
     aiResult.value = rankRes.ai_analysis || null

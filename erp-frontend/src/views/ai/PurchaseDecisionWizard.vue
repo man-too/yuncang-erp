@@ -26,7 +26,6 @@ import { usePurchaseDecisionStore } from '@/stores/purchaseDecision'
 import StepInventory from './steps/StepInventory.vue'
 import StepRisk from './steps/StepRisk.vue'
 import StepSupplier from './steps/StepSupplier.vue'
-import StepForecast from './steps/StepForecast.vue'
 import StepSummary from './steps/StepSummary.vue'
 
 defineEmits<{ close: [] }>()
@@ -35,10 +34,9 @@ const store = usePurchaseDecisionStore()
 const currentStepComp = computed(() => {
   switch (store.currentStep) {
     case 0: return StepInventory
-    case 1: return StepRisk
-    case 2: return StepSupplier
-    case 3: return StepForecast
-    case 4: return StepSummary
+    case 1: return StepSupplier
+    case 2: return StepRisk
+    case 3: return StepSummary
     default: return StepInventory
   }
 })

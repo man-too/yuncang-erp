@@ -1,37 +1,29 @@
 <template>
   <div class="step-inventory">
-    <!-- Section 1: 库存充裕率条形图 -->
-    <el-collapse v-model="activeSections" class="inventory-collapse" @change="onCollapseChange">
-      <el-collapse-item title="库存充裕率概览" name="chart">
-        <div v-loading="chartLoading" class="chart-area">
-          <v-chart
-            ref="barChartRef"
-            v-if="!chartLoading && hasData"
-            :option="chartOption"
-            autoresize
-            style="height: 400px;"
-          />
-          <el-empty v-else-if="!chartLoading" description="暂无库存数据" :image-size="80" />
-        </div>
-        <!-- AI 分析结果 -->
-        <div class="ai-analysis-section">
-          <div v-if="aiLoading" class="ai-loading" v-loading="true" element-loading-text="AI 正在分析库存...">
-            <span style="margin-left: 8px;">AI 正在分析库存数据...</span>
-          </div>
-          <el-alert v-else-if="store.aiRecommendation" type="success" :closable="false" show-icon>
-            <template #default>
-              <div class="ai-result-text">{{ aiResultText }}</div>
-            </template>
-          </el-alert>
-          <div v-else class="ai-placeholder">AI 分析暂时不可用</div>
-        </div>
-      </el-collapse-item>
-    </el-collapse>
+    <!-- Section 1: KPI Cards -->
+    <div class="kpi-row">
+      <div class="kpi-card">
+        <div class="kpi-value">{{ kpiTurnoverDays }}</div>
+        <div class="kpi-label">周转天数</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-value">{{ kpiDeadStockCount }}</div>
+        <div class="kpi-label">呆滞品数</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-value">{{ kpiDeadStockPct }}</div>
+        <div class="kpi-label">呆滞品占比</div>
+      </div>
+      <div class="kpi-card kpi-card--highlight">
+        <div class="kpi-value">{{ kpiCapitalOccupied }}</div>
+        <div class="kpi-label">占用资金</div>
+      </div>
+    </div>
 
-    <!-- Section 3: 补货清单 -->
+    <!-- Section 2: Product List sorted by risk -->
     <div class="table-section">
       <div class="table-header">
-        <span class="section-title">补货清单</span>
+        <span class="section-title">库存产品清单</span>
         <div class="header-right">
           <span class="section-count">共 {{ store.allProducts.length }} 项</span>
           <el-button type="primary" size="default" @click="openAddDialog">+ 添加产品</el-button>
@@ -39,29 +31,137 @@
       </div>
 
       <el-table
-        :data="store.allProducts"
-        max-height="420"
+        :data="sortedProducts"
+        max-height="480"
         size="small"
         stripe
+        row-key="product_id"
         @selection-change="onSelectionChange"
         ref="tableRef"
+        :row-class-name="rowClassName"
+        @row-click="onRowClick"
+        highlight-current-row
       >
         <el-table-column type="selection" width="40" />
+        <el-table-column label="状态" width="72" align="center">
+          <template #default="{ row }">
+            <el-tag :type="statusTagType(row)" size="small" effect="dark">
+              {{ statusLabel(row) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="product_name" label="产品名称" min-width="150" show-overflow-tooltip />
         <el-table-column prop="product_code" label="编码" min-width="100" />
-        <el-table-column prop="specification" label="规格" min-width="100" show-overflow-tooltip />
-        <el-table-column prop="unit" label="单位" width="60" align="center" />
         <el-table-column prop="warehouse_name" label="仓库" min-width="110" />
-        <el-table-column prop="current_qty" label="当前库存" min-width="90" align="right" />
-        <el-table-column prop="min_stock" label="最低库存" min-width="90" align="right" />
-        <el-table-column label="操作" width="110" align="center" fixed="right">
+        <el-table-column label="当前库存" min-width="90" align="right">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="openEditDialog(row)">编辑</el-button>
-            <el-button link type="danger" size="small" @click="store.removeProduct(row.product_id)">删除</el-button>
+            <span :class="{ 'text-danger': row.current_qty < row.min_stock }">{{ row.current_qty }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="min_stock" label="最低库存" min-width="90" align="right" />
+        <el-table-column prop="max_stock" label="最高库存" min-width="90" align="right" />
+        <el-table-column label="操作" width="130" align="center" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click.stop="toggleExpand(row)">
+              {{ expandedProductId === row.product_id ? '收起' : '详情' }}
+            </el-button>
+            <el-button link type="primary" size="small" @click.stop="openEditDialog(row)">编辑</el-button>
+            <el-button link type="danger" size="small" @click.stop="store.removeProduct(row.product_id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
 
+      <!-- Expandable Detail Panel -->
+      <div v-if="expandedProduct" class="expand-panel">
+        <div class="expand-header">
+          <span class="expand-title">{{ expandedProduct.product_name }} — 库存详情与销量预测</span>
+          <el-button link type="info" size="small" @click="expandedProductId = null">收起</el-button>
+        </div>
+
+        <!-- Stock Info -->
+        <div class="expand-stock-row">
+          <div class="stock-info-item">
+            <span class="stock-info-label">当前库存</span>
+            <span class="stock-info-value" :class="{ 'text-danger': expandedProduct.current_qty < expandedProduct.min_stock }">
+              {{ expandedProduct.current_qty }} {{ expandedProduct.unit }}
+            </span>
+          </div>
+          <div class="stock-info-item">
+            <span class="stock-info-label">安全库存</span>
+            <span class="stock-info-value">{{ expandedProduct.min_stock }} {{ expandedProduct.unit }}</span>
+          </div>
+          <div class="stock-info-item">
+            <span class="stock-info-label">最高库存</span>
+            <span class="stock-info-value">{{ expandedProduct.max_stock }} {{ expandedProduct.unit }}</span>
+          </div>
+          <div class="stock-info-item">
+            <span class="stock-info-label">缺口</span>
+            <span class="stock-info-value" :class="{ 'text-danger': expandedProduct.current_qty < expandedProduct.min_stock }">
+              {{ Math.max(0, expandedProduct.min_stock - expandedProduct.current_qty) }} {{ expandedProduct.unit }}
+            </span>
+          </div>
+        </div>
+
+        <!-- Sales Forecast Chart -->
+        <div class="expand-chart-section">
+          <div v-loading="detailChartLoading" class="chart-area" style="height: 300px;">
+            <v-chart
+              v-if="!detailChartLoading && (detailHistoryData.length > 0 || detailPredictionData.length > 0)"
+              :option="detailChartOption"
+              autoresize
+              style="height: 100%;"
+            />
+            <el-empty v-else-if="!detailChartLoading" description="暂无销量数据" :image-size="60" />
+          </div>
+        </div>
+
+        <!-- ROP Calculation Result -->
+        <div class="expand-rop-section">
+          <div class="rop-title">ROP 再订货点计算</div>
+          <div v-if="ropLoading" class="rop-loading" v-loading="true" element-loading-text="计算中..."></div>
+          <div v-else-if="ropResult" class="rop-grid">
+            <div class="rop-item">
+              <span class="rop-label">日均销量</span>
+              <span class="rop-value">{{ ropResult.avg_daily_sales ?? '—' }}</span>
+            </div>
+            <div class="rop-item">
+              <span class="rop-label">提前期(天)</span>
+              <span class="rop-value">{{ ropResult.lead_time ?? '—' }}</span>
+            </div>
+            <div class="rop-item">
+              <span class="rop-label">安全库存</span>
+              <span class="rop-value">{{ ropResult.safety_stock ?? '—' }}</span>
+            </div>
+            <div class="rop-item">
+              <span class="rop-label">再订货点(ROP)</span>
+              <span class="rop-value rop-value--highlight">{{ ropResult.rop ?? '—' }}</span>
+            </div>
+            <div class="rop-item">
+              <span class="rop-label">建议采购量</span>
+              <span class="rop-value rop-value--highlight">{{ ropResult.suggested_qty ?? '—' }}</span>
+            </div>
+          </div>
+          <div v-else class="rop-placeholder">点击产品自动计算 ROP</div>
+        </div>
+
+        <!-- Purchase Quantity Input -->
+        <div class="expand-qty-row">
+          <span class="qty-label">采购数量：</span>
+          <el-input-number
+            v-model="expandedQuantity"
+            :min="0"
+            :precision="0"
+            size="default"
+            style="width: 180px;"
+          />
+          <span class="qty-unit">{{ expandedProduct.unit || '个' }}</span>
+          <span v-if="ropResult?.suggested_qty" class="qty-hint">
+            (ROP建议: {{ ropResult.suggested_qty }})
+          </span>
+        </div>
+      </div>
+
+      <!-- Table Footer -->
       <div class="table-footer">
         <div class="footer-left">
           <el-button size="small" @click="store.selectAll()">全选</el-button>
@@ -71,7 +171,7 @@
             @click="store.removeSelected()">删除选中</el-button>
         </div>
         <el-button type="primary" :disabled="store.allProducts.length === 0" @click="handleNextStep">
-          下一步：风险评估 →
+          下一步：供应商匹配
         </el-button>
       </div>
     </div>
@@ -122,214 +222,310 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
-import { BarChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent, LegendComponent, TitleComponent } from 'echarts/components'
+import { LineChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent, LegendComponent, DataZoomComponent } from 'echarts/components'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { usePurchaseDecisionStore } from '@/stores/purchaseDecision'
-import { inventoryApi, productApi } from '@/api'
+import { aiApi, inventoryApi, productApi } from '@/api'
 
-use([CanvasRenderer, BarChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent])
+use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent])
 
 const store = usePurchaseDecisionStore()
 
-// -- Section 1: 库存充裕率条形图 --
-const chartLoading = ref(false)
-const inventoryItems = ref<any[]>([])
-const activeSections = ref<string[]>(['chart'])
-const barChartRef = ref<any>(null)
+// =========================================================================
+// Section 1: KPI Cards
+// =========================================================================
 
-const hasData = computed(() => inventoryItems.value.length > 0)
-
-interface SufficiencyItem {
-  product_name: string
-  current_qty: number
-  min_stock: number
-  max_stock: number
-  sufficiency: number
-}
-
-const sufficiencyData = computed<SufficiencyItem[]>(() => {
-  return inventoryItems.value
-    .map((item: any) => {
-      const currentQty = item.quantity ?? 0
-      const maxStock = item.max_stock ?? 0
-      const minStock = item.min_stock ?? 0
-      let sufficiency = 0
-      if (maxStock > 0) {
-        sufficiency = (currentQty / maxStock) * 100
-      } else if (minStock > 0) {
-        sufficiency = (currentQty / minStock) * 50
-      }
-      sufficiency = Math.min(Math.max(sufficiency, 0), 100)
-      return {
-        product_name: item.product_name || '未知产品',
-        current_qty: currentQty,
-        min_stock: minStock,
-        max_stock: maxStock,
-        sufficiency: Math.round(sufficiency * 10) / 10,
-      }
-    })
-    .sort((a, b) => a.sufficiency - b.sufficiency) // 升序排列，最缺货的在最上面
+const kpiTurnoverDays = computed(() => {
+  const v = store.inventoryKpi?.turnover_days
+  return v != null ? v : '—'
+})
+const kpiDeadStockCount = computed(() => {
+  const v = store.inventoryKpi?.dead_stock_count
+  return v != null ? v : '—'
+})
+const kpiDeadStockPct = computed(() => {
+  const v = store.inventoryKpi?.dead_stock_pct
+  return v != null ? (typeof v === 'number' ? `${v.toFixed(1)}%` : v) : '—'
+})
+const kpiCapitalOccupied = computed(() => {
+  const v = store.inventoryKpi?.capital_occupied
+  if (v == null) return '—'
+  if (typeof v === 'number') {
+    if (v >= 10000) return `¥${(v / 10000).toFixed(1)}万`
+    return `¥${v.toFixed(0)}`
+  }
+  return v
 })
 
-function getBarColor(value: number): string {
-  if (value < 30) return '#ef5350'
-  if (value < 60) return '#ff9800'
-  return '#4caf50'
+// =========================================================================
+// Section 2: Product List (sorted by risk)
+// =========================================================================
+
+function riskRank(item: { current_qty: number; min_stock: number; max_stock: number }): number {
+  if (item.current_qty < item.min_stock) return 0 // 缺货
+  const range = item.max_stock - item.min_stock
+  if (range <= 0) return 2
+  const ratio = (item.current_qty - item.min_stock) / range
+  if (ratio < 0.3) return 1 // 偏低 (close to ROP zone)
+  if (ratio > 0.9) return 3 // 偏高
+  return 2 // 正常
 }
 
-const chartOption = computed(() => {
-  const data = sufficiencyData.value
-  const categories = data.map(d => d.product_name)
-  const values = data.map(d => d.sufficiency)
-  const bgValues = data.map(d => 100 - d.sufficiency)
+const sortedProducts = computed(() => {
+  return [...store.allProducts].sort((a, b) => {
+    return riskRank(a) - riskRank(b)
+  })
+})
+
+function statusLabel(row: { current_qty: number; min_stock: number; max_stock: number }): string {
+  const r = riskRank(row)
+  return ['缺货', '偏低', '正常', '偏高'][r] || '正常'
+}
+
+function statusTagType(row: { current_qty: number; min_stock: number; max_stock: number }): string {
+  const r = riskRank(row)
+  return ['danger', 'warning', 'success', 'info'][r] || 'info'
+}
+
+function rowClassName({ row }: { row: any }): string {
+  const r = riskRank(row)
+  return ['row-danger', 'row-warning', '', 'row-info'][r] || ''
+}
+
+// =========================================================================
+// Expandable Detail
+// =========================================================================
+
+const expandedProductId = ref<number | null>(null)
+const expandedProduct = computed(() =>
+  expandedProductId.value != null
+    ? store.allProducts.find(p => p.product_id === expandedProductId.value) ?? null
+    : null
+)
+
+// Purchase quantity for expanded product
+const expandedQuantity = computed({
+  get: () => {
+    const pid = expandedProductId.value
+    if (pid == null) return 0
+    return store.quantities[pid] ?? expandedProduct.value?.suggested_qty ?? 0
+  },
+  set: (val: number) => {
+    const pid = expandedProductId.value
+    if (pid != null) {
+      store.quantities[pid] = val
+    }
+  },
+})
+
+function toggleExpand(row: any) {
+  if (expandedProductId.value === row.product_id) {
+    expandedProductId.value = null
+  } else {
+    expandedProductId.value = row.product_id
+  }
+}
+
+function onRowClick(row: any) {
+  toggleExpand(row)
+}
+
+// Watch expandedProductId to load detail data
+watch(expandedProductId, (pid) => {
+  if (pid != null) {
+    loadDetailData(pid)
+  }
+})
+
+// =========================================================================
+// Detail: Sales Forecast Chart
+// =========================================================================
+
+const detailChartLoading = ref(false)
+const detailHistoryData = ref<any[]>([])
+const detailPredictionData = ref<number[]>([])
+const detailPredictionDates = ref<string[]>([])
+
+function getFutureDates(lastDate: string | null, count: number): string[] {
+  if (!lastDate) return Array.from({ length: count }, (_, i) => `D+${i + 1}`)
+  const d = new Date(lastDate)
+  return Array.from({ length: count }, (_, i) => {
+    const nd = new Date(d)
+    nd.setDate(nd.getDate() + i + 1)
+    return nd.toISOString().slice(0, 10)
+  })
+}
+
+const detailChartOption = computed(() => {
+  const histDates = detailHistoryData.value.map((d: any) => d.date)
+  const histValues = detailHistoryData.value.map((d: any) => d.total_qty || 0)
+  const predDates = detailPredictionDates.value
+  const predValues = detailPredictionData.value
+
+  const xData = [...histDates, ...predDates]
+  const histSeries = [...histValues, ...Array(predDates.length).fill(null)] as (number | null)[]
+  const predSeries = [...Array(histValues.length).fill(null), ...predValues] as (number | null)[]
 
   return {
-    title: { text: '库存充裕率概览', left: 'center', textStyle: { fontSize: 14, fontWeight: 'bold' } },
     tooltip: {
       trigger: 'axis' as const,
-      axisPointer: { type: 'shadow' as const },
-      formatter: (params: any) => {
-        const idx = params[0]?.dataIndex
-        if (idx == null) return ''
-        const item = data[idx]
-        return `<b>${item.product_name}</b><br/>当前库存: ${item.current_qty}<br/>安全库存: ${item.min_stock}~${item.max_stock}<br/>充裕率: ${item.sufficiency}%`
-      },
+      axisPointer: { type: 'cross' as const, crossStyle: { color: '#999' } },
     },
-    grid: { left: 160, right: 40, top: 50, bottom: 30 },
+    legend: {
+      data: ['历史销量', '预测销量'],
+      bottom: 0,
+    },
+    grid: { left: 50, right: 20, top: 20, bottom: 40 },
     xAxis: {
-      type: 'value' as const,
-      max: 100,
-      axisLabel: { formatter: '{value}%' },
+      type: 'category' as const,
+      data: xData,
+      axisLabel: { fontSize: 11 },
     },
     yAxis: {
-      type: 'category' as const,
-      data: categories,
-      axisLabel: { width: 140, overflow: 'truncate', fontSize: 11 },
+      type: 'value' as const,
+      name: '销量',
     },
+    dataZoom: [{ type: 'inside' as const, start: 0, end: 100 }],
     series: [
       {
-        name: '充裕率',
-        type: 'bar' as const,
-        stack: 'total',
-        data: values.map(v => ({
-          value: v,
-          itemStyle: { color: getBarColor(v) },
-        })),
-        barWidth: '60%',
+        name: '历史销量',
+        type: 'line' as const,
+        smooth: true,
+        data: histSeries,
+        showSymbol: true,
+        symbol: 'circle',
+        symbolSize: 5,
+        lineStyle: { color: '#005BF5', width: 2 },
       },
       {
-        name: '背景',
-        type: 'bar' as const,
-        stack: 'total',
-        data: bgValues,
-        itemStyle: { color: '#e0e0e0' },
-        barWidth: '60%',
-        z: -1,
-        tooltip: { show: false },
+        name: '预测销量',
+        type: 'line' as const,
+        smooth: true,
+        data: predSeries,
+        showSymbol: true,
+        symbol: 'diamond',
+        symbolSize: 7,
+        lineStyle: { color: '#fc8452', width: 2, type: 'dashed' as const },
+        areaStyle: { color: 'rgba(252,132,82,0.1)' },
+        itemStyle: { color: '#fc8452' },
       },
     ],
   }
 })
 
-async function loadInventoryData() {
-  chartLoading.value = true
+// =========================================================================
+// Detail: ROP Calculation
+// =========================================================================
+
+const ropLoading = ref(false)
+const ropResult = ref<any>(null)
+
+async function loadDetailData(productId: number) {
+  detailChartLoading.value = true
+  ropLoading.value = true
+  detailHistoryData.value = []
+  detailPredictionData.value = []
+  detailPredictionDates.value = []
+  ropResult.value = null
+
   try {
-    const res: any = await inventoryApi.stock({ page_size: 100 })
-    inventoryItems.value = res?.items || []
-  } catch {
-    inventoryItems.value = []
-  } finally {
-    chartLoading.value = false
-  }
-}
+    // Load sales history + prediction in parallel with ROP
+    const [history, pred, rop] = await Promise.allSettled([
+      aiApi.salesHistory({ product_id: productId, days: 90 }),
+      aiApi.salesPrediction(productId),
+      store.fetchSuggestedQty(productId),
+    ])
 
-// -- Collapse change → resize chart to avoid ghost rendering --
-function onCollapseChange(val: string[]) {
-  if (val.includes('chart')) {
-    nextTick(() => {
-      setTimeout(() => {
-        const chart = barChartRef.value
-        if (chart) chart.resize()
-      }, 300)
-    })
-  }
-}
-
-// -- Section 2: AI --
-const aiLoading = ref(false)
-
-const aiResultText = computed(() => {
-  const rec = store.aiRecommendation
-  if (!rec) return ''
-  if (rec.summary) return rec.summary
-  if (rec.content) return rec.content
-  const blocks = rec.blocks || []
-  const parts: string[] = []
-  for (const block of blocks) {
-    if (block.type === 'text' && block.content) parts.push(block.content)
-    else if (block.type === 'table' && block.rows) {
-      parts.push(block.rows.map((r: any) => `${r.product_name || r.name} ${r.quantity || r.suggested_qty || ''}件`).filter(Boolean).join('；'))
+    // Process history
+    if (history.status === 'fulfilled') {
+      detailHistoryData.value = Array.isArray(history.value) ? history.value : []
     }
-  }
-  return parts.join('\n') || 'AI 已完成分析，请查看补货清单'
-})
 
-async function loadAIRecommendation() {
-  aiLoading.value = true
-  try {
-    await store.getRecommendation()
-    if (store.aiRecommendation) {
-      const blocks = store.aiRecommendation.blocks || []
-      for (const block of blocks) {
-        if (block.type === 'table' && block.rows) {
-          for (const row of block.rows) {
-            const productName = row.product_name || row.name || ''
-            const product = store.allProducts.find(
-              p => p.product_name === productName || p.product_id === row.product_id
-            )
-            if (product) {
-              const newSet = new Set(store.selectedIds.value)
-              newSet.add(product.product_id)
-              store.selectedIds.value = newSet
-              store.quantities.value[product.product_id] =
-                row.quantity || row.suggested_qty || Math.max(0, product.min_stock - product.current_qty)
-            }
-          }
+    // Process prediction
+    if (pred.status === 'fulfilled' && pred.value) {
+      const predValue = pred.value as any
+      let parsed = predValue.output_data ?? predValue.data ?? predValue
+      if (typeof parsed === 'string') {
+        try { parsed = JSON.parse(parsed) } catch { /* keep as string */ }
+      }
+      const lastDate =
+        detailHistoryData.value.length > 0
+          ? detailHistoryData.value[detailHistoryData.value.length - 1].date
+          : null
+      if (parsed?.predictions && Array.isArray(parsed.predictions)) {
+        detailPredictionData.value = parsed.predictions
+        detailPredictionDates.value = getFutureDates(lastDate, parsed.predictions.length)
+      } else if (parsed?.forecast_next_30d) {
+        const dailyAvg = Math.round(parsed.forecast_next_30d / 30)
+        detailPredictionData.value = Array.from({ length: 7 }, () => dailyAvg)
+        detailPredictionDates.value = getFutureDates(lastDate, 7)
+      }
+    }
+
+    // Process ROP
+    if (rop.status === 'fulfilled' && rop.value) {
+      ropResult.value = rop.value
+      // Set default purchase quantity from ROP suggestion
+      const suggested = rop.value.suggested_qty
+      if (suggested != null && suggested > 0) {
+        if (!(productId in store.quantities) || store.quantities[productId] === 0) {
+          store.quantities[productId] = suggested
         }
       }
     }
   } catch {
-    // AI 分析暂时不可用，静默处理
+    // Silently handle errors
   } finally {
-    aiLoading.value = false
+    detailChartLoading.value = false
+    ropLoading.value = false
   }
 }
 
-// -- Section 3: 补货清单 --
-const tableRef = ref()
-const warehouses = ref<any[]>([])
+// =========================================================================
+// Navigation
+// =========================================================================
 
 function handleNextStep() {
   if (store.allProducts.length === 0) {
     ElMessage.warning('请先添加补货产品')
     return
   }
+  // Initialize quantities for products that haven't been set
+  for (const p of store.allProducts) {
+    if (!(p.product_id in store.quantities) || store.quantities[p.product_id] === 0) {
+      store.quantities[p.product_id] = p.suggested_qty
+    }
+  }
   store.nextStep()
 }
 
-// -- Add/Edit Dialog --
+// =========================================================================
+// Table selection
+// =========================================================================
+
+const tableRef = ref()
+
+function onSelectionChange(rows: any[]) {
+  store.selectedIds = new Set(rows.map(r => r.product_id))
+}
+
+// =========================================================================
+// Add / Edit Dialog
+// =========================================================================
+
 const dialogVisible = ref(false)
 const isEditing = ref(false)
 const editingProductId = ref(0)
 const productSearching = ref(false)
 const productOptions = ref<any[]>([])
 const formRef = ref<FormInstance>()
+const warehouses = ref<any[]>([])
 
 const dialogForm = ref({
   product_id: null as number | null,
@@ -427,19 +623,16 @@ async function submitDialog() {
   dialogVisible.value = false
 }
 
-// -- Table selection --
-function onSelectionChange(rows: any[]) {
-  store.selectedIds.value = new Set(rows.map(r => r.product_id))
-}
+// =========================================================================
+// Lifecycle
+// =========================================================================
 
-// -- Lifecycle --
 onMounted(async () => {
   await Promise.all([
     store.fetchLowStockProducts(),
-    loadInventoryData(),
-    loadAIRecommendation(),
+    store.fetchInventoryKpi(),
     (async () => {
-      try { warehouses.value = (await inventoryApi.warehouses.list()) || [] }
+      try { warehouses.value = (await inventoryApi.warehouses.list() as any) || [] }
       catch { warehouses.value = [] }
     })(),
   ])
@@ -454,47 +647,43 @@ onMounted(async () => {
   padding: 8px 0;
 }
 
-/* Section 1: 充裕率条形图 */
-.inventory-collapse :deep(.el-collapse-item__header) {
-  font-weight: 600;
-  font-size: 15px;
-  padding: 10px 0;
+/* ========================================================================== */
+/* KPI Cards                                                                  */
+/* ========================================================================== */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
 }
-.chart-area {
-  min-height: 340px;
-  border: 1px solid var(--border-light);
-  border-radius: 8px;
-  padding: 12px;
+.kpi-card {
   background: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  border: 1px solid var(--border-light, #ebeef5);
+  border-radius: 10px;
+  padding: 18px 20px;
+  text-align: center;
+}
+.kpi-card--highlight {
+  border-color: #e0f2fe;
+  background: linear-gradient(135deg, #f0f9ff 0%, #fff 100%);
+}
+.kpi-value {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text-primary, #303133);
+  line-height: 1.2;
+}
+.kpi-card--highlight .kpi-value {
+  color: #005BF5;
+}
+.kpi-label {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text-secondary, #909399);
 }
 
-/* AI 分析区域（条形图下方） */
-.ai-analysis-section {
-  margin-top: 16px;
-  min-height: 40px;
-}
-.ai-analysis-section .ai-loading {
-  display: flex;
-  align-items: center;
-  color: var(--text-secondary);
-  font-size: 13px;
-  min-height: 40px;
-}
-.ai-placeholder {
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-style: italic;
-}
-.ai-result-text {
-  white-space: pre-wrap;
-  line-height: 1.8;
-  font-size: 13px;
-}
-
-/* Section 3: Table */
+/* ========================================================================== */
+/* Product List Table                                                         */
+/* ========================================================================== */
 .table-section {
   display: flex;
   flex-direction: column;
@@ -520,20 +709,161 @@ onMounted(async () => {
   display: flex;
   gap: 8px;
 }
+.section-title {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text-primary, #303133);
+}
+.section-count {
+  font-size: 12px;
+  color: var(--text-secondary, #909399);
+}
 
-/* Shared */
-.section-row {
+/* Row highlighting */
+:deep(.row-danger) {
+  background-color: #fef0f0 !important;
+}
+:deep(.row-warning) {
+  background-color: #fdf6ec !important;
+}
+:deep(.row-info) {
+  background-color: #f0f9ff !important;
+}
+
+.text-danger {
+  color: #f56c6c;
+  font-weight: 600;
+}
+
+/* ========================================================================== */
+/* Expandable Detail Panel                                                    */
+/* ========================================================================== */
+.expand-panel {
+  border: 1px solid #d9ecff;
+  border-radius: 10px;
+  padding: 20px;
+  background: #fafcff;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: slideDown 0.2s ease-out;
+}
+@keyframes slideDown {
+  from { opacity: 0; max-height: 0; }
+  to { opacity: 1; max-height: 800px; }
+}
+.expand-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
-.section-title {
+.expand-title {
   font-weight: 600;
   font-size: 15px;
-  color: var(--text-primary);
+  color: var(--text-primary, #303133);
 }
-.section-count {
+
+/* Stock Info Row */
+.expand-stock-row {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.stock-info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.stock-info-label {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-secondary, #909399);
+}
+.stock-info-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary, #303133);
+}
+
+/* Chart Area */
+.expand-chart-section {
+  margin: 0;
+}
+.chart-area {
+  min-height: 300px;
+  border: 1px solid var(--border-light, #ebeef5);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ROP Section */
+.expand-rop-section {
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  padding: 14px 18px;
+  background: #fff;
+}
+.rop-title {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 12px;
+  color: var(--text-primary, #303133);
+}
+.rop-loading {
+  min-height: 40px;
+}
+.rop-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+}
+.rop-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rop-label {
+  font-size: 12px;
+  color: var(--text-secondary, #909399);
+}
+.rop-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary, #303133);
+}
+.rop-value--highlight {
+  color: #005BF5;
+}
+.rop-placeholder {
+  color: var(--text-secondary, #909399);
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* Quantity Input Row */
+.expand-qty-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+}
+.qty-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #303133);
+}
+.qty-unit {
+  font-size: 13px;
+  color: #606266;
+}
+.qty-hint {
+  font-size: 12px;
+  color: var(--text-secondary, #909399);
 }
 </style>

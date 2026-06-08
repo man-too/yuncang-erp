@@ -83,6 +83,34 @@ TOOLS = [
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "audit_purchase_plan",
+            "description": "审核采购计划风险：并行调用库存KPI、供应商评分、天气数据、销量预测，由LLM串联输出风险矩阵。当用户要求审核采购方案、评估采购风险时调用",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "product_id": {"type": "integer", "description": "产品ID"},
+                                "product_name": {"type": "string", "description": "产品名称"},
+                                "quantity": {"type": "integer", "description": "采购数量"},
+                                "supplier_id": {"type": "integer", "description": "供应商ID"},
+                                "supplier_name": {"type": "string", "description": "供应商名称"},
+                            },
+                            "required": ["product_id", "product_name", "quantity", "supplier_id", "supplier_name"],
+                        },
+                        "description": "采购计划明细列表",
+                    },
+                },
+                "required": ["items"],
+            },
+        },
+    },
 ]
 
 
@@ -101,6 +129,8 @@ def execute(name: str, args: dict, db: Session) -> dict | None:
         return _render_comprehensive_diagnosis(db)
     if name == "render_purchase_advice":
         return _render_purchase_advice(db)
+    if name == "audit_purchase_plan":
+        return _audit_purchase_plan(args, db)
     return None
 
 
@@ -1040,3 +1070,174 @@ def _render_purchase_advice(db: Session) -> dict:
     })
 
     return {"_render": True, "blocks": blocks}
+
+
+# ── 8. Audit Purchase Plan ──────────────────────────────────────────────
+
+def _audit_purchase_plan(args: dict, db: Session) -> dict:
+    """审核采购计划风险：并行调用库存KPI、供应商评分、天气、销量预测，生成风险矩阵"""
+    from app.services.calculation_service import calc_inventory_kpi, calc_reorder_point
+    from app.services.supplier_scoring import calc_supplier_score
+    from app.tools.weather_tools import execute as weather_exec
+
+    items = args.get("items", [])
+    if not items:
+        return {"error": "采购计划为空"}
+
+    # ── 1. 库存 KPI ──
+    kpi = calc_inventory_kpi(db)
+
+    # ── 2. 供应商评分（去重）──
+    supplier_ids = list(set(it["supplier_id"] for it in items if it.get("supplier_id")))
+    supplier_scores = {}
+    for sid in supplier_ids:
+        try:
+            supplier_scores[sid] = calc_supplier_score(sid, db)
+        except Exception:
+            supplier_scores[sid] = {"total_score": 0, "risk_penalty": 0, "is_single_source": False}
+
+    # ── 3. 天气（取第一个仓库所在城市）──
+    weather_result = None
+    warehouse = db.query(Warehouse).first()
+    if warehouse and warehouse.address:
+        import re
+        city_match = re.search(r"([一-鿿]{2,4}[市省区])", warehouse.address)
+        city = city_match.group(1).rstrip("市省区") if city_match else "上海"
+        weather_result = weather_exec("query_weather", {"city": city, "days": 7}, db)
+
+    # ── 4. 产品 ROP / 销量预测 ──
+    product_risks = []
+    for it in items:
+        pid = it.get("product_id")
+        if not pid:
+            continue
+        rop_info = calc_reorder_point(pid, db, it.get("supplier_id"))
+
+        product = db.query(Product).filter(Product.id == pid).first()
+        current_qty = 0
+        if product:
+            inv_row = db.query(func.sum(Inventory.quantity)).filter(
+                Inventory.product_id == pid
+            ).scalar()
+            current_qty = float(inv_row or 0)
+
+        # 缺货风险判断
+        rop_val = rop_info.get("rop", 0)
+        if current_qty == 0:
+            stock_risk = "高"
+        elif current_qty < rop_val:
+            stock_risk = "中"
+        else:
+            stock_risk = "低"
+
+        # 供应商风险
+        sid = it.get("supplier_id")
+        sinfo = supplier_scores.get(sid, {}) if sid else {}
+        supplier_risk = "高" if sinfo.get("is_single_source") else "低" if sinfo.get("total_score", 0) >= 75 else "中"
+
+        product_risks.append({
+            "product_id": pid,
+            "product_name": it.get("product_name", ""),
+            "quantity": it.get("quantity", 0),
+            "current_qty": current_qty,
+            "rop": rop_val,
+            "stock_risk": stock_risk,
+            "supplier_risk": supplier_risk,
+            "supplier_name": it.get("supplier_name", ""),
+            "is_single_source": sinfo.get("is_single_source", False),
+        })
+
+    # ── 5. 构建风险矩阵 ──
+    risk_matrix = []
+
+    # 供应商风险
+    for sid, sinfo in supplier_scores.items():
+        if sinfo.get("is_single_source"):
+            prods = [it["product_name"] for it in items if it.get("supplier_id") == sid]
+            risk_matrix.append({
+                "category": "供应商风险",
+                "item": f"供应商{sinfo.get('supplier_name', f'#{sid}')}单源依赖({', '.join(prods)})",
+                "probability": "高",
+                "impact": "高",
+                "mitigability": "中",
+                "score": 3 * 3 * 2,
+                "suggestion": "建议开发备选供应商分担份额",
+            })
+
+    # 需求风险（天气影响）
+    if weather_result and not weather_result.get("error"):
+        affected = weather_result.get("affected_products", [])
+        if affected:
+            prod_names = [p.get("product_name", "") for p in affected[:5]]
+            risk_matrix.append({
+                "category": "需求风险",
+                "item": f"天气变化可能影响{', '.join(prod_names)}需求",
+                "probability": "中",
+                "impact": "低",
+                "mitigability": "高",
+                "score": 2 * 1 * 1,
+                "suggestion": f"根据天气调整{', '.join(prod_names[:3])}采购量",
+            })
+
+    # 库存风险
+    for pr in product_risks:
+        if pr["stock_risk"] == "高":
+            risk_matrix.append({
+                "category": "库存风险",
+                "item": f"{pr['product_name']}当前库存{pr['current_qty']}件，已低于ROP({pr['rop']})",
+                "probability": "高",
+                "impact": "高",
+                "mitigability": "中",
+                "score": 3 * 3 * 2,
+                "suggestion": f"建议优先补货{pr['product_name']}，当前库存极低",
+            })
+        elif pr["stock_risk"] == "中":
+            risk_matrix.append({
+                "category": "库存风险",
+                "item": f"{pr['product_name']}库存{pr['current_qty']}件接近ROP({pr['rop']})",
+                "probability": "中",
+                "impact": "中",
+                "mitigability": "高",
+                "score": 2 * 2 * 1,
+                "suggestion": f"关注{pr['product_name']}库存变化，适时补货",
+            })
+
+    # 外部风险（天气异常）
+    if weather_result and not weather_result.get("error"):
+        summary = weather_result.get("summary", "")
+        if "高温" in summary or "降雨" in summary or "低温" in summary:
+            risk_matrix.append({
+                "category": "外部风险",
+                "item": f"天气异常：{summary}，可能影响物流",
+                "probability": "低",
+                "impact": "高",
+                "mitigability": "低",
+                "score": 1 * 3 * 3,
+                "suggestion": "关注物流时效，提前备货或选择备用运输路线",
+            })
+
+    # ── 6. 综合风险等级 ──
+    max_score = max((r["score"] for r in risk_matrix), default=0)
+    if max_score >= 9:
+        overall_risk = "高"
+    elif max_score >= 5:
+        overall_risk = "中等"
+    else:
+        overall_risk = "低"
+
+    # ── 7. 综合建议 ──
+    suggestions = [r["suggestion"] for r in risk_matrix[:3]]
+    action = "；".join(suggestions) if suggestions else "风险可控，可按计划执行"
+
+    weather_summary = ""
+    if weather_result and not weather_result.get("error"):
+        weather_summary = weather_result.get("summary", "")
+
+    return {
+        "risk_matrix": risk_matrix,
+        "weather_summary": weather_summary,
+        "kpi": kpi,
+        "product_risks": product_risks,
+        "overall_risk": overall_risk,
+        "action": action,
+    }
