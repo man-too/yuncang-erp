@@ -17,7 +17,7 @@ client = None
 if settings.OPENAI_API_KEY:
     client = OpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.AI_BASE_URL)
 
-SYSTEM_PROMPT = """你是供应链ERP的AI助手。你的能力是调用工具查询数据库，然后根据问题类型选择回复方式。
+SYSTEM_PROMPT = """你是供应链ERP的AI助手。你的能力是调用工具查询数据库，同时可以帮助用户查询天气信息，然后根据问题类型选择回复方式。
 
 ## 核心原则
 用户问的是业务数据问题，你必须调用合适的工具查询真实数据，不能只靠自己的知识回答。
@@ -38,7 +38,7 @@ SYSTEM_PROMPT = """你是供应链ERP的AI助手。你的能力是调用工具�
 - ROP/安全库存/补货量 → calc_reorder_point
 - 供应商评分+风险 → calc_supplier_score
 - 库存周转/呆滞/资金 → calc_inventory_kpi
-- 天气对产品影响 → query_weather
+- 天气查询/天气情况/天气对产品影响 → query_weather（用户问天气预报、天气状况、天气对销售/采购的影响时调用）
 
 **画图类工具（仅在用户明确要图表时才调用）：**
 - 库存热力图 → render_inventory_heatmap（用户说"看库存图""库存热力图"时）
@@ -270,7 +270,7 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
     user_msg = messages[-1].get("content", "") if messages else ""
     data_keywords = ["销售", "库存", "供应商", "产品", "商品", "订单", "采购", "出库", "入库",
                      "预测", "数据", "统计", "报表", "预警", "风险", "利润", "成本",
-                     "金额", "销量", "数量", "热销", "卖"]
+                     "金额", "销量", "数量", "热销", "卖", "天气"]
     if any(kw in user_msg for kw in data_keywords):
         full_messages.insert(1, {
             "role": "system",
