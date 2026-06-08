@@ -109,39 +109,59 @@ const avgPrice = computed(() => {
 })
 
 const orderItems = computed(() => {
-  const items: any[] = []
-  for (const p of store.allProducts) {
-    const qty = store.forecastQuantities[p.product_id] || p.suggested_qty || 0
-    if (qty <= 0) continue
-    const price = store.forecastPrices[p.product_id] || p.purchase_price || 0
-    const supplierIds = store.supplierChoices[p.product_id] || []
-    if (supplierIds.length === 0) {
-      items.push({
-        product_id: p.product_id,
-        product_name: p.product_name,
-        supplier_id: 1,
-        supplier_name: '未指定',
-        quantity: qty,
-        unit_price: price,
-        total: qty * price,
-      })
-    } else {
-      for (const sid of supplierIds) {
-        const supplier = store.supplierInfo[sid]
-        items.push({
-          product_id: p.product_id,
-          product_name: p.product_name,
-          supplier_id: sid,
-          supplier_name: supplier?.name || `供应商#${sid}`,
-          quantity: qty,
-          unit_price: price,
-          total: qty * price,
-        })
+    const items: any[] = []
+    for (const p of store.allProducts) {
+      const qty = store.quantities[p.product_id] || store.suggestedQtys[p.product_id]?.suggested_qty || p.suggested_qty || 0
+      if (qty <= 0) continue
+      const price = store.forecastPrices[p.product_id] || p.purchase_price || 0
+
+      // Check if we have per-supplier quantity allocation
+      const allocations = store.supplierQuantities[p.product_id]
+      if (allocations && Object.keys(allocations).length > 0) {
+        for (const [sid, allocQty] of Object.entries(allocations)) {
+          if ((allocQty as number) <= 0) continue
+          const supplier = store.supplierInfo[Number(sid)]
+          items.push({
+            product_id: p.product_id,
+            product_name: p.product_name,
+            supplier_id: Number(sid),
+            supplier_name: supplier?.name || supplier?.supplier_name || `供应商#${sid}`,
+            quantity: allocQty as number,
+            unit_price: price,
+            total: (allocQty as number) * price,
+          })
+        }
+      } else {
+        // Fallback: use supplierChoices
+        const supplierIds = store.supplierChoices[p.product_id] || []
+        if (supplierIds.length === 0) {
+          items.push({
+            product_id: p.product_id,
+            product_name: p.product_name,
+            supplier_id: 1,
+            supplier_name: '未指定',
+            quantity: qty,
+            unit_price: price,
+            total: qty * price,
+          })
+        } else {
+          for (const sid of supplierIds) {
+            const supplier = store.supplierInfo[sid]
+            items.push({
+              product_id: p.product_id,
+              product_name: p.product_name,
+              supplier_id: sid,
+              supplier_name: supplier?.name || supplier?.supplier_name || `供应商#${sid}`,
+              quantity: qty,
+              unit_price: price,
+              total: qty * price,
+            })
+          }
+        }
       }
     }
-  }
-  return items
-})
+    return items
+  })
 
 async function onConfirm() {
   if (orderItems.value.length === 0) {

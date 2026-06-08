@@ -1,111 +1,95 @@
 <template>
   <div class="step-risk" v-loading="loading">
-    <!-- 上部: AI 风险分析汇总 -->
-    <div class="summary-section">
-      <el-alert
-        v-if="summaryText"
-        :title="'AI 风险评估汇总'"
-        type="warning"
-        :closable="false"
-        show-icon
-      >
-        <template #default>
-          <div class="summary-text">{{ summaryText }}</div>
-        </template>
-      </el-alert>
-      <el-alert
-        v-else-if="!loading && store.allProducts.length > 0"
-        title="暂无风险评估数据，请稍后重试"
-        type="info"
-        :closable="false"
-        show-icon
-      />
-    </div>
-
-    <!-- 中部: 产品风险卡片列表 -->
-    <div v-if="groups.length > 0" class="risk-groups">
-      <div v-for="group in groups" :key="group.level" class="risk-group">
-        <div class="group-header">
-          <el-tag :type="group.tagType" size="default">
-            {{ group.label }}
-          </el-tag>
-          <span class="group-count">{{ group.items.length }} 项</span>
-        </div>
-        <div class="group-cards">
-          <el-card
-            v-for="product in group.items"
-            :key="product.product_id"
-            class="risk-card"
-            shadow="hover"
-          >
-            <div class="card-content">
-              <div class="card-left">
-                <div class="product-name">{{ product.product_name }}</div>
-                <div class="product-code">{{ product.product_code }}</div>
-              </div>
-              <div class="card-center">
-                <div class="info-row">
-                  <span class="info-label">当前库存</span>
-                  <span class="info-value">{{ product.current_qty }} {{ product.unit }}</span>
-                </div>
-                <div class="info-row">
-                  <span class="info-label">日均销量</span>
-                  <span class="info-value">
-                    {{ dailySales(product) }} {{ product.unit }}/天
-                  </span>
-                </div>
-                <div class="info-row">
-                  <span class="info-label">缺货天数</span>
-                  <span class="info-value" :class="shortageDaysClass(product)">
-                    {{ shortageDays(product) ?? '—' }}
-                    <template v-if="shortageDays(product) !== null"> 天</template>
-                  </span>
-                </div>
-              </div>
-              <div class="card-right">
-                <el-tag :type="group.tagType" size="small">
-                  {{ group.label }}
-                </el-tag>
-                <div class="score" v-if="riskScore(product.product_id)">
-                  风险评分: {{ riskScore(product.product_id) }}
-                </div>
-                <el-button
-                  type="danger"
-                  link
-                  size="small"
-                  @click="onRemove(product.product_id)"
-                >
-                  移除
-                </el-button>
-              </div>
-            </div>
-            <div
-              v-if="riskReason(product.product_id)"
-              class="card-reason"
-            >
-              {{ riskReason(product.product_id) }}
-            </div>
-          </el-card>
-        </div>
+    <!-- Weather Summary Card -->
+    <div v-if="weatherText" class="weather-card">
+      <div class="weather-icon">
+        <el-icon :size="28"><Cloudy /></el-icon>
+      </div>
+      <div class="weather-info">
+        <div class="weather-title">外部环境 — 天气概况</div>
+        <div class="weather-text">{{ weatherText }}</div>
       </div>
     </div>
 
-    <!-- 空状态 -->
+    <!-- Risk Matrix Table -->
+    <div v-if="riskMatrix.length > 0" class="matrix-section">
+      <div class="section-row">
+        <span class="section-title">风险矩阵</span>
+        <el-button size="small" @click="runAudit" :loading="loading">重新审核</el-button>
+      </div>
+      <el-table
+        :data="riskMatrix"
+        stripe
+        size="small"
+        border
+        max-height="360"
+        class="risk-table"
+      >
+        <el-table-column prop="category" label="类别" width="110" align="center">
+          <template #default="{ row }">
+            <el-tag :type="categoryTagType(row.category)" size="small" effect="plain">
+              {{ row.category }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="item" label="风险项" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="probability" label="概率" width="80" align="center">
+          <template #default="{ row }">
+            <el-tag :type="levelTagType(row.probability)" size="small">{{ row.probability }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="impact" label="影响" width="80" align="center">
+          <template #default="{ row }">
+            <el-tag :type="levelTagType(row.impact)" size="small">{{ row.impact }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="mitigability" label="可缓解" width="80" align="center">
+          <template #default="{ row }">
+            <el-tag :type="levelTagType(row.mitigability, true)" size="small">{{ row.mitigability }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="score" label="分" width="70" align="center" sortable>
+          <template #default="{ row }">
+            <span :class="scoreClass(row.score)">{{ row.score }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="suggestion" label="建议" min-width="200" show-overflow-tooltip />
+      </el-table>
+    </div>
+
+    <!-- Empty state when no audit result yet -->
     <el-empty
-      v-if="!loading && store.allProducts.length === 0"
-      description="暂未选择产品，请返回上一步添加"
+      v-else-if="!loading"
+      description="暂无风险审核数据，点击下方按钮开始审核"
       :image-size="80"
     />
 
-    <!-- 下部: 上一步/下一步按钮 -->
+    <!-- Overall Risk Level -->
+    <div v-if="overallRisk" class="overall-section">
+      <div class="overall-label">整体风险等级</div>
+      <div class="overall-badge" :class="overallRiskClass">
+        {{ overallRisk }}
+      </div>
+    </div>
+
+    <!-- AI Action Suggestion -->
+    <el-alert
+      v-if="actionSuggestion"
+      :title="actionSuggestion"
+      :type="actionAlertType"
+      :closable="false"
+      show-icon
+    />
+
+    <!-- Navigation -->
     <div class="nav-buttons">
-      <el-button @click="store.prevStep()">上一步：库存分析</el-button>
+      <el-button @click="store.prevStep()">上一步：供应商匹配</el-button>
       <el-button
         type="primary"
-        :disabled="store.allProducts.length === 0"
+        :disabled="!auditResult"
         @click="store.nextStep()"
       >
-        下一步：供应商匹配 →
+        下一步：汇总确认 →
       </el-button>
     </div>
   </div>
@@ -113,6 +97,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { Cloudy } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { usePurchaseDecisionStore } from '@/stores/purchaseDecision'
 import { aiApi } from '@/api'
@@ -120,188 +105,132 @@ import { aiApi } from '@/api'
 const store = usePurchaseDecisionStore()
 const loading = ref(false)
 
-// ----- 风险等级定义 -----
+// ----- Computed from store.auditResult -----
 
-const riskLevelOrder: Record<string, number> = {
-  critical: 0,
-  high: 1,
-  medium: 2,
-  low: 3,
-}
+const auditResult = computed(() => store.auditResult)
 
-const riskLevelLabels: Record<string, string> = {
-  critical: '严重风险',
-  high: '高风险',
-  medium: '中风险',
-  low: '低风险',
-  warning: '中风险',
-  normal: '低风险',
-  unknown: '未知风险',
-}
+const riskMatrix = computed(() => {
+  const res = auditResult.value
+  if (!res || !Array.isArray(res.risk_matrix)) return []
+  return res.risk_matrix
+})
 
-const riskLevelTagTypes: Record<string, string> = {
-  critical: 'danger',
-  high: 'warning',
-  medium: '',
-  low: 'success',
-  warning: '',
-  normal: 'success',
-  unknown: 'info',
-}
+const overallRisk = computed(() => {
+  const res = auditResult.value
+  if (!res) return null
+  return res.overall_risk || null
+})
 
-// ----- 加载风险评估 -----
+const actionSuggestion = computed(() => {
+  const res = auditResult.value
+  if (!res) return null
+  return res.action || null
+})
 
-async function fetchRiskAssessment() {
-  if (store.allProducts.length === 0) return
+const weatherText = computed(() => {
+  const res = auditResult.value
+  if (res && res.weather_summary) return res.weather_summary
+  return weatherData.value || null
+})
 
-  const productIds = store.allProducts.map(p => p.product_id)
-  const existingIds = Object.keys(store.riskResults).map(Number)
-  const missingIds = productIds.filter(id => !existingIds.includes(id))
+// ----- Weather data (fallback if not in auditResult) -----
 
-  if (missingIds.length === 0) return
+const weatherData = ref<string | null>(null)
 
-  loading.value = true
+async function fetchWeather() {
   try {
-    const res: any = await aiApi.stockAlertBatch({ product_ids: productIds })
-    if (res && res.results) {
-      for (const item of res.results) {
-        store.riskResults[item.product_id] = {
-          level: item.risk_level || 'low',
-          score: item.risk_score ?? 0,
-          reason: item.reason || '',
-          daily_sales: item.daily_sales ?? 0,
-          shortage_days: item.shortage_days ?? 0,
-        }
+    const res: any = await aiApi.weather({ city: '上海' })
+    if (res) {
+      // Build a readable summary from the weather response
+      if (typeof res === 'string') {
+        weatherData.value = res
+      } else if (res.summary) {
+        weatherData.value = res.summary
+      } else if (res.forecast && Array.isArray(res.forecast)) {
+        const lines = res.forecast.slice(0, 3).map((d: any) =>
+          `${d.date || ''} ${d.weather || d.condition || ''} ${d.temp_high ?? d.high ?? ''}/${d.temp_low ?? d.low ?? ''}°C`
+        )
+        weatherData.value = lines.join('；')
+      } else if (res.weather || res.condition) {
+        weatherData.value = `${res.city || '上海'}：${res.weather || res.condition}，${res.temperature ?? res.temp ?? ''}°C`
       }
-      ElMessage.success(`已完成 ${res.results.length} 项风险评估`)
     }
   } catch {
-    ElMessage.warning('风险评估服务暂不可用，请稍后重试')
+    // Weather is optional, silently ignore
+  }
+}
+
+// ----- Risk audit -----
+
+async function runAudit() {
+  loading.value = true
+  try {
+    const res = await store.fetchAuditPlan()
+    if (res) {
+      ElMessage.success('风险审核完成')
+    } else if (!res) {
+      // fetchAuditPlan already shows a warning if items are empty
+    }
+  } catch {
+    ElMessage.warning('风险审核服务暂不可用')
   } finally {
     loading.value = false
   }
 }
 
-// ----- 数据读取 -----
+// ----- Tag type helpers -----
 
-function riskInfo(productId: number) {
-  return store.riskResults[productId]
+const categoryColors: Record<string, string> = {
+  '供应商风险': 'warning',
+  '需求风险': 'danger',
+  '库存风险': '',
+  '外部风险': 'info',
 }
 
-function dailySales(product: { product_id: number; daily_sales_avg: number }) {
-  const info = riskInfo(product.product_id)
-  return info?.daily_sales ?? product.daily_sales_avg ?? 0
+function categoryTagType(category: string): string {
+  return categoryColors[category] || ''
 }
 
-function shortageDays(product: { product_id: number }): number | null {
-  const info = riskInfo(product.product_id)
-  if (!info || info.shortage_days === undefined || info.shortage_days === null) return null
-  return info.shortage_days
+function levelTagType(level: string, invert = false): string {
+  // For probability/impact: 高=danger, 中=warning, 低=success
+  // For mitigability (invert=true): 高=success, 中=warning, 低=danger
+  const map = invert
+    ? { '高': 'success', '中': 'warning', '低': 'danger' } as const
+    : { '高': 'danger', '中': 'warning', '低': 'success' } as const
+  return map[level as keyof typeof map] || 'info'
 }
 
-function riskScore(productId: number): number | null {
-  const info = riskInfo(productId)
-  if (!info || info.score === undefined || info.score === null) return null
-  return info.score
+function scoreClass(score: number): string {
+  if (score >= 8) return 'score-critical'
+  if (score >= 5) return 'score-high'
+  if (score >= 3) return 'score-medium'
+  return 'score-low'
 }
 
-function riskReason(productId: number): string | null {
-  const info = riskInfo(productId)
-  if (!info || !info.reason) return null
-  return info.reason
-}
-
-function shortageDaysClass(product: { product_id: number }) {
-  const days = shortageDays(product)
-  if (days === null) return ''
-  if (days <= 3) return 'text-danger'
-  if (days <= 7) return 'text-warning'
-  return 'text-success'
-}
-
-// ----- 按风险等级分组 -----
-
-const groups = computed(() => {
-  const map: Record<string, any[]> = {
-    critical: [],
-    high: [],
-    medium: [],
-    low: [],
-  }
-
-  // Map alert_level values to risk group buckets
-  const levelToGroup: Record<string, string> = {
-    critical: 'critical',
-    high: 'high',
-    medium: 'medium',
-    low: 'low',
-    warning: 'medium',
-    normal: 'low',
-    unknown: 'low',
-  }
-
-  for (const product of store.allProducts) {
-    const info = riskInfo(product.product_id)
-    const rawLevel = info?.level || 'low'
-    const level = levelToGroup[rawLevel] || 'low'
-    if (map[level]) {
-      map[level].push(product)
-    } else {
-      map.low.push(product)
-    }
-  }
-
-  return Object.entries(map)
-    .filter(([, items]) => items.length > 0)
-    .sort(([a], [b]) => riskLevelOrder[a] - riskLevelOrder[b])
-    .map(([level, items]) => ({
-      level,
-      label: riskLevelLabels[level] || level,
-      tagType: riskLevelTagTypes[level] || '',
-      items,
-    }))
+const overallRiskClass = computed(() => {
+  const r = overallRisk.value
+  if (!r) return ''
+  if (r === '高' || r === 'high') return 'risk-high'
+  if (r === '中' || r === 'medium') return 'risk-medium'
+  return 'risk-low'
 })
 
-// ----- AI 汇总文本 -----
-
-const summaryText = computed(() => {
-  const results = store.riskResults
-  if (!results || Object.keys(results).length === 0) return ''
-
-  let criticalCount = 0
-  let highCount = 0
-  let mediumCount = 0
-  let lowCount = 0
-
-  for (const product of store.allProducts) {
-    const info = riskInfo(product.product_id)
-    const level = info?.level
-    if (level === 'critical') criticalCount++
-    else if (level === 'high') highCount++
-    else if (level === 'medium') mediumCount++
-    else lowCount++
-  }
-
-  const parts: string[] = []
-  if (criticalCount > 0) parts.push(`${criticalCount} 项严重风险`)
-  if (highCount > 0) parts.push(`${highCount} 项高风险`)
-  if (mediumCount > 0) parts.push(`${mediumCount} 项中风险`)
-  if (lowCount > 0) parts.push(`${lowCount} 项低风险`)
-
-  return `已对 ${store.allProducts.length} 个产品完成风险评估：${parts.join('，')}。请优先处理严重风险项，考虑调整安全库存或寻找替代供应商。`
+const actionAlertType = computed(() => {
+  const r = overallRisk.value
+  if (r === '高' || r === 'high') return 'error'
+  if (r === '中' || r === 'medium') return 'warning'
+  return 'success'
 })
 
-// ----- 移除产品 -----
+// ----- Lifecycle -----
 
-function onRemove(productId: number) {
-  store.removeProduct(productId)
-  delete store.riskResults[productId]
-}
-
-// ----- 生命周期 -----
-
-onMounted(() => {
-  fetchRiskAssessment()
+onMounted(async () => {
+  // Fetch weather in parallel (non-blocking)
+  fetchWeather()
+  // Run audit if not already done
+  if (!auditResult.value) {
+    await runAudit()
+  }
 })
 </script>
 
@@ -313,139 +242,116 @@ onMounted(() => {
   padding: 8px 0;
 }
 
-/* ----- 上部: 汇总 ----- */
-.summary-section {
-  min-height: 40px;
-}
-
-.summary-text {
-  white-space: pre-wrap;
-  line-height: 1.8;
-  font-size: 13px;
-}
-
-/* ----- 中部: 风险卡片 ----- */
-.risk-groups {
+/* ----- Weather Card ----- */
+.weather-card {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #e8f4fd, #f0f7ff);
+  border: 1px solid #b3d8fd;
+  border-radius: 10px;
 }
-
-.risk-group {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.group-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.group-count {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.group-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.risk-card {
-  border: 1px solid var(--border-light);
-  border-radius: 8px;
-}
-
-.risk-card :deep(.el-card__body) {
-  padding: 14px 16px;
-}
-
-.card-content {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.card-left {
-  min-width: 140px;
+.weather-icon {
   flex-shrink: 0;
+  color: #409eff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #d9ecff;
 }
-
-.product-name {
+.weather-info {
+  flex: 1;
+}
+.weather-title {
   font-weight: 600;
   font-size: 14px;
   color: var(--text-primary);
+  margin-bottom: 4px;
 }
-
-.product-code {
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-top: 2px;
-}
-
-.card-center {
-  flex: 1;
-  display: flex;
-  gap: 20px;
-}
-
-.info-row {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.info-label {
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-
-.info-value {
+.weather-text {
   font-size: 13px;
-  font-weight: 500;
-  color: var(--text-primary);
-}
-
-.text-danger {
-  color: var(--color-danger);
-  font-weight: 600;
-}
-
-.text-warning {
-  color: var(--color-warning);
-  font-weight: 600;
-}
-
-.text-success {
-  color: var(--color-success);
-}
-
-.card-right {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.score {
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-
-.card-reason {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--border-light);
-  font-size: 12px;
   color: #606266;
   line-height: 1.6;
+  white-space: pre-wrap;
 }
 
-/* ----- 下部: 导航按钮 ----- */
+/* ----- Matrix Section ----- */
+.matrix-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.section-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.section-title {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text-primary);
+}
+.risk-table :deep(.score-critical) {
+  color: #c45656;
+  font-weight: 700;
+}
+.risk-table :deep(.score-high) {
+  color: #e6a23c;
+  font-weight: 600;
+}
+.risk-table :deep(.score-medium) {
+  color: #e6a23c;
+}
+.risk-table :deep(.score-low) {
+  color: #67c23a;
+}
+
+/* ----- Overall Risk ----- */
+.overall-section {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 24px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid var(--border-light);
+}
+.overall-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.overall-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 24px;
+  border-radius: 20px;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+.overall-badge.risk-high {
+  background: #fef0f0;
+  color: #c45656;
+  border: 2px solid #fbc4c4;
+}
+.overall-badge.risk-medium {
+  background: #fdf6ec;
+  color: #e6a23c;
+  border: 2px solid #f5dab1;
+}
+.overall-badge.risk-low {
+  background: #f0f9eb;
+  color: #67c23a;
+  border: 2px solid #c2e7b0;
+}
+
+/* ----- Navigation ----- */
 .nav-buttons {
   display: flex;
   justify-content: space-between;

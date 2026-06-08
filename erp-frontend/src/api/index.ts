@@ -131,4 +131,14 @@ export const aiApi = {
   quickChart: (type: string) => http.get('/ai/quick-chart', { params: { type } }),
   execute: (data: { conversation_id: string; action: string; params: Record<string, any> }) =>
     http.post('/ai/execute', data),
+  /** 库存 KPI */
+  inventoryKpi: () => http.post('/ai/inventory-kpi'),
+  /** ROP 建议采购量 */
+  suggestedQty: (data: { product_id: number; supplier_id?: number }) => http.post('/ai/suggested-qty', null, { params: data }),
+  /** 供应商综合评分 */
+  supplierScore: (data?: { supplier_ids?: number[] }) => http.post('/ai/supplier-score', data),
+  /** 天气查询 */
+  weather: (params?: { city?: string; days?: number }) => http.get('/ai/weather', { params }),
+  /** 采购计划风险审核 */
+  auditPlan: (data: { items: Array<{ product_id: number; product_name: string; quantity: number; supplier_id: number; supplier_name: string }> }) => http.post('/ai/audit-plan', data),
 }

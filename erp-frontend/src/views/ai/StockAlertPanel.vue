@@ -91,7 +91,7 @@ const loadHeatmap = async () => {
     const params: any = {}
     if (filterWarehouseId.value) params.warehouse_id = filterWarehouseId.value
     if (filterProductId.value) params.product_id = filterProductId.value
-    heatmapData.value = (await inventoryApi.heatmap(params)) || []
+    heatmapData.value = (await inventoryApi.heatmap(params) as any) || []
   } finally { loading.value = false }
 }
 

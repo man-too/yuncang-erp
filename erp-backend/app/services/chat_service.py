@@ -29,9 +29,12 @@ SYSTEM_PROMPT = """你是供应链ERP的AI助手。你的能力是调用工具�
 - 销售趋势/预测（需要图表时）→ render_sales_trend
 - 供应商排名（需要图表时）→ render_supplier_ranking
 - 综合诊断 → render_comprehensive_diagnosis
-- 采购建议 → render_purchase_advice
+- 采购建议 → render_purchase_advice 或 recommend_restock
 - 单独查数据（不需要图表或只要数值）→ query_inventory / query_sales_history / query_suppliers 等
 - 不要同时调 render_* 和对应的 query_*，避免重复数据
+- 计算：calc_reorder_point（ROP再订货点+安全库存）、calc_supplier_score（供应商评分+风险惩罚）、calc_inventory_kpi（周转/呆滞/资金占用）
+- 天气：query_weather（城市天气预报+受影响产品）
+- 风险审核：audit_purchase_plan（采购计划风险矩阵+天气+供应商+库存风险）
 
 ## 回复格式（必须返回严格 JSON）
 {"content": "markdown文字", "blocks": []}

@@ -21,6 +21,7 @@ QUICK_ACTION_TOOLS = {
     "supplier_ranking": "render_supplier_ranking",
     "dashboard": "render_comprehensive_diagnosis",
     "purchase_advice": "render_purchase_advice",
+    "safety_stock": "render_inventory_heatmap",
     "transfer_advice": "render_inventory_heatmap",  # 调拨基于库存热力图
 }
 
@@ -113,3 +114,68 @@ def ai_execute(
         related_id=related_id,
         link=link,
     )
+
+
+# ── Phase 3 新增端点 ──────────────────────────────────────────────────
+
+@router.post("/inventory-kpi")
+def ai_inventory_kpi(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """库存KPI：周转天数、呆滞SKU数、资金占用"""
+    return execute_tool("calc_inventory_kpi", {}, db)
+
+
+@router.post("/suggested-qty")
+def ai_suggested_qty(
+    product_id: int,
+    supplier_id: int | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """ROP建议采购量"""
+    return execute_tool("calc_reorder_point", {"product_id": product_id, "supplier_id": supplier_id}, db)
+
+
+@router.post("/supplier-score")
+def ai_supplier_score(
+    data: dict | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """供应商综合评分+风险惩罚+建议份额"""
+    from app.services.supplier_scoring import calc_supplier_score
+    supplier_ids = (data or {}).get("supplier_ids") if data else None
+    if supplier_ids:
+        results = []
+        for sid in supplier_ids:
+            try:
+                results.append(calc_supplier_score(sid, db))
+            except Exception:
+                continue
+        results.sort(key=lambda x: x.get("total_score", 0), reverse=True)
+        return {"suppliers": results}
+    return {"suppliers": calc_supplier_score(None, db)}
+
+
+@router.get("/weather")
+def ai_weather(
+    city: str = "上海",
+    days: int = 7,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """天气查询"""
+    return execute_tool("query_weather", {"city": city, "days": days}, db)
+
+
+@router.post("/audit-plan")
+def ai_audit_plan(
+    data: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """采购计划风险审核"""
+    items = data.get("items", [])
+    return execute_tool("audit_purchase_plan", {"items": items}, db)
