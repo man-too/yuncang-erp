@@ -35,6 +35,8 @@ def delete_warehouse(wh_id: int, db: Session = Depends(get_db), _user: User = De
     wh = db.query(Warehouse).filter(Warehouse.id == wh_id).first()
     if not wh:
         raise HTTPException(status_code=404, detail="仓库不存在")
+    if db.query(Inventory).filter(Inventory.warehouse_id == wh_id).first():
+        raise HTTPException(status_code=400, detail="该仓库下存在库存记录，无法删除")
     db.delete(wh)
     db.commit()
     return {"message": "删除成功"}
@@ -79,6 +81,8 @@ def list_stock(
 
     total = query.count()
     results = query.order_by(Inventory.id.desc()).offset((page - 1) * page_size).limit(page_size).all()
+
+    wh_map = {w.id: w.name for w in db.query(Warehouse).all()}
     items = []
     for inv, prod in results:
         items.append({
@@ -88,6 +92,7 @@ def list_stock(
             "product_name": prod.name,
             "category_id": prod.category_id,
             "warehouse_id": inv.warehouse_id,
+            "warehouse_name": wh_map.get(inv.warehouse_id, ""),
             "quantity": inv.quantity,
             "locked_quantity": inv.locked_quantity,
             "available_quantity": inv.available_quantity,

@@ -62,6 +62,7 @@
         <el-table-column type="selection" width="50" />
         <el-table-column prop="product_code" label="产品编码" width="120" />
         <el-table-column prop="product_name" label="产品名称" min-width="150" />
+        <el-table-column prop="warehouse_name" label="仓库" width="120" />
         <el-table-column prop="quantity" label="库存量" width="100" align="right" />
         <el-table-column prop="locked_quantity" label="锁定" width="80" align="right" />
         <el-table-column prop="available_quantity" label="可用" width="100" align="right" />
