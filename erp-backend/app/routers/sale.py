@@ -73,6 +73,8 @@ def delete_customer(customer_id: int, db: Session = Depends(get_db), _user: User
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="客户不存在")
+    if db.query(SaleOrder).filter(SaleOrder.customer_id == customer_id).first():
+        raise HTTPException(status_code=400, detail="该客户下存在销售订单，无法删除")
     db.delete(customer)
     db.commit()
     return {"message": "删除成功"}
@@ -80,11 +82,18 @@ def delete_customer(customer_id: int, db: Session = Depends(get_db), _user: User
 
 # ========== 销售订单 ==========
 def generate_so_no(db: Session) -> str:
+    """生成销售单号：SO + 日期 + 序号（加锁防竞态）"""
     today = date.today().strftime("%Y%m%d")
-    count = db.query(SaleOrder).filter(
-        SaleOrder.order_no.like(f"SO{today}%")
-    ).count()
-    return f"SO{today}{count + 1:04d}"
+    prefix = f"SO{today}"
+    last = (
+        db.query(SaleOrder.order_no)
+        .filter(SaleOrder.order_no.like(f"{prefix}%"))
+        .order_by(SaleOrder.id.desc())
+        .with_for_update()
+        .first()
+    )
+    seq = int(last[0][len(prefix):]) + 1 if last else 1
+    return f"{prefix}{seq:04d}"
 
 
 @router.get("/orders")
@@ -171,6 +180,8 @@ def delete_sale_order(order_id: int, db: Session = Depends(get_db), _user: User 
     order = db.query(SaleOrder).filter(SaleOrder.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="订单不存在")
+    if order.status not in ("draft", "cancelled"):
+        raise HTTPException(status_code=400, detail="仅草稿或已取消的订单可删除")
     db.query(SaleOrderItem).filter(SaleOrderItem.order_id == order_id).delete()
     db.delete(order)
     db.commit()
@@ -193,6 +204,7 @@ def create_outbound(req: SaleOutboundCreate, db: Session = Depends(get_db), user
         remark=req.remark,
     )
     db.add(outbound)
+    db.flush()
 
     items = db.query(SaleOrderItem).filter(SaleOrderItem.order_id == req.order_id).all()
     total_out = 0
@@ -209,6 +221,8 @@ def create_outbound(req: SaleOutboundCreate, db: Session = Depends(get_db), user
             raise HTTPException(status_code=400, detail=f"产品 {item.product_id} 库存不足")
 
         inv.quantity -= qty
+        if inv.quantity < 0:
+            raise HTTPException(status_code=400, detail=f"产品 {item.product_id} 库存不足，无法出库")
         inv.available_quantity = inv.quantity - inv.locked_quantity
         item.shipped_quantity += qty
 

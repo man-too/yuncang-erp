@@ -236,7 +236,7 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
     """主对话函数，处理 Function Calling 循环"""
     if not client:
         return {
-            "content": "AI 服务未配置，请在 .env 中设置 OPENAI_API_KEY（可使用 DeepSeek API）。",
+            "content": "AI 服务未配置，请在 .env 中设置 OPENAI_API_KEY。",
             "blocks": [],
         }
 

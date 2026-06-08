@@ -5,6 +5,9 @@ from typing import Optional
 
 from app.database import get_db
 from app.models.product import Product, ProductCategory
+from app.models.purchase import PurchaseOrderItem
+from app.models.sale import SaleOrderItem
+from app.models.inventory import Inventory
 from app.schemas.business import ProductCreate, ProductUpdate, ProductResponse, ProductCategoryCreate
 from app.routers.auth import get_current_user
 from app.models.user import User
@@ -89,6 +92,12 @@ def delete_product(product_id: int, db: Session = Depends(get_db), _user: User =
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="产品不存在")
+    if db.query(PurchaseOrderItem).filter(PurchaseOrderItem.product_id == product_id).first():
+        raise HTTPException(status_code=400, detail="该产品存在采购订单明细，无法删除")
+    if db.query(SaleOrderItem).filter(SaleOrderItem.product_id == product_id).first():
+        raise HTTPException(status_code=400, detail="该产品存在销售订单明细，无法删除")
+    if db.query(Inventory).filter(Inventory.product_id == product_id).first():
+        raise HTTPException(status_code=400, detail="该产品存在库存记录，无法删除")
     db.delete(product)
     db.commit()
     return {"message": "删除成功"}

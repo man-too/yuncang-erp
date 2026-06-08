@@ -16,12 +16,18 @@ router = APIRouter(prefix="/api/purchase", tags=["采购管理"])
 
 
 def generate_order_no(db: Session) -> str:
-    """生成采购单号：PO + 日期 + 序号"""
+    """生成采购单号：PO + 日期 + 序号（加锁防竞态）"""
     today = date.today().strftime("%Y%m%d")
-    count = db.query(PurchaseOrder).filter(
-        PurchaseOrder.order_no.like(f"PO{today}%")
-    ).count()
-    return f"PO{today}{count + 1:04d}"
+    prefix = f"PO{today}"
+    last = (
+        db.query(PurchaseOrder.order_no)
+        .filter(PurchaseOrder.order_no.like(f"{prefix}%"))
+        .order_by(PurchaseOrder.id.desc())
+        .with_for_update()
+        .first()
+    )
+    seq = int(last[0][len(prefix):]) + 1 if last else 1
+    return f"{prefix}{seq:04d}"
 
 
 @router.get("/orders")
@@ -119,6 +125,8 @@ def delete_order(order_id: int, db: Session = Depends(get_db), _user: User = Dep
     order = db.query(PurchaseOrder).filter(PurchaseOrder.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="订单不存在")
+    if order.status not in ("draft", "cancelled"):
+        raise HTTPException(status_code=400, detail="仅草稿或已取消的订单可删除")
     db.query(PurchaseOrderItem).filter(PurchaseOrderItem.order_id == order_id).delete()
     db.delete(order)
     db.commit()
@@ -141,6 +149,7 @@ def create_inbound(req: PurchaseInboundCreate, db: Session = Depends(get_db), us
         remark=req.remark,
     )
     db.add(inbound)
+    db.flush()
 
     items = db.query(PurchaseOrderItem).filter(PurchaseOrderItem.order_id == req.order_id).all()
     total_in = 0

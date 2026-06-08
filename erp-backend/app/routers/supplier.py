@@ -5,6 +5,7 @@ from typing import Optional
 
 from app.database import get_db
 from app.models.supplier import Supplier, SupplierEvaluation
+from app.models.purchase import PurchaseOrder
 from app.schemas.business import SupplierCreate, SupplierUpdate, SupplierResponse
 from app.routers.auth import get_current_user
 from app.models.user import User
@@ -82,6 +83,8 @@ def delete_supplier(supplier_id: int, db: Session = Depends(get_db), _user: User
     supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
     if not supplier:
         raise HTTPException(status_code=404, detail="供应商不存在")
+    if db.query(PurchaseOrder).filter(PurchaseOrder.supplier_id == supplier_id).first():
+        raise HTTPException(status_code=400, detail="该供应商下存在采购订单，无法删除")
     db.delete(supplier)
     db.commit()
     return {"message": "删除成功"}

@@ -1,5 +1,6 @@
 """应用配置"""
 import os
+import warnings
 from pydantic_settings import BaseSettings
 from typing import List
 
@@ -8,7 +9,7 @@ _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env
 
 class Settings(BaseSettings):
     DATABASE_URL: str = "mysql+pymysql://erp_user:erp_password@localhost:3306/erp_db?charset=utf8mb4"
-    SECRET_KEY: str = "change-this-secret-key-in-production"
+    SECRET_KEY: str = ""
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
     OPENAI_API_KEY: str = ""
@@ -26,3 +27,9 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+if not settings.SECRET_KEY:
+    warnings.warn(
+        "SECRET_KEY 未设置！请在 .env 中配置 SECRET_KEY，否则 JWT 可被伪造。",
+        stacklevel=2,
+    )
