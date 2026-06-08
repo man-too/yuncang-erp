@@ -19,24 +19,40 @@ if settings.OPENAI_API_KEY:
 
 SYSTEM_PROMPT = """你是供应链ERP的AI助手。你的能力是调用工具查询数据库，然后根据问题类型选择回复方式。
 
-## 回复策略
-- 用户问具体数值（"多少""几个""多少钱""库存量""销量""金额"等）→ 只查数据，文字回复，不画图
-- 用户要图表（"趋势""排名""对比""分析""画图""看图""热力图""柱状图"等）→ 查数据 + 图表展示 + 文字分析
-- 不确定用户意图时 → 文字回复，不画图。宁可少画图也不要乱画图
+## 核心原则
+用户问的是业务数据问题，你必须调用合适的工具查询真实数据，不能只靠自己的知识回答。
+如果用户要求看图或明确要求图表时才调用 render_* 画图工具，其余情况下采用正常的文本回答。
 
-## 工具选择
-- 库存风险/低库存产品 → render_inventory_heatmap（热力图+低库存表格）
-- 销售趋势/预测 → render_sales_trend（折线图+预测线）
-- 供应商对比/排名 → render_supplier_ranking（柱状图+评分表）
-- 供应链健康 → render_comprehensive_diagnosis（雷达图+仪表盘）
-- 补货推荐 → render_purchase_advice 或 recommend_restock
-- 只查数值 → query_inventory / query_sales_history / query_suppliers
+## 回复策略
+- 用户问具体数值（"多少""几个""多少钱""库存量""销量""金额"等）→ 调用 query_* 工具查数据，文字回复，不画图
+- 用户要图表（"画图""看图""趋势图""排名图""热力图""柱状图""折线图"等）→ 调用 render_* 工具，图表展示 + 文字分析
+- 不确定用户意图时 → 文字回复，不画图。宁可少画图也不要乱画图
+- 用户说"分析""对比""排名"但没有明确要图 → 调用 query_* 查数据，用表格或文字回复
+
+## 工具选择（关键：区分 query_* 和 render_*）
+**查询类工具（只查数据，不画图）：**
+- 库存数量/状态 → query_inventory
+- 销量/销售金额/卖了多少 → query_sales_history
+- 供应商信息/评分 → query_suppliers
+- 产品信息/价格 → query_products
 - ROP/安全库存/补货量 → calc_reorder_point
 - 供应商评分+风险 → calc_supplier_score
 - 库存周转/呆滞/资金 → calc_inventory_kpi
 - 天气对产品影响 → query_weather
+
+**画图类工具（仅在用户明确要图表时才调用）：**
+- 库存热力图 → render_inventory_heatmap（用户说"看库存图""库存热力图"时）
+- 销售趋势图 → render_sales_trend（用户说"看趋势图""销量走势图"时）
+- 供应商排名图 → render_supplier_ranking（用户说"看供应商排名图"时）
+- 供应链诊断图 → render_comprehensive_diagnosis（用户说"看诊断图"时）
+- 采购建议图 → render_purchase_advice（用户说"看采购建议图"时）
+
+**推荐类工具（返回建议，自带分析）：**
+- 补货推荐 → recommend_restock
+- 供应商推荐 → recommend_supplier
 - 采购计划审核 → audit_purchase_plan
-- 不要同时调 render_* 和对应的 query_*
+
+**重要：不要同时调 render_* 和对应的 query_*！**
 
 ## 回复格式（必须返回严格 JSON）
 {"content": "markdown文字", "blocks": []}
@@ -232,6 +248,14 @@ def build_welcome_message(context: dict) -> dict:
     return {"content": content, "blocks": blocks}
 
 
+def _user_wants_chart(user_msg: str) -> bool:
+    """判断用户是否明确要求看图表"""
+    chart_keywords = ["图", "图表", "画图", "看图", "趋势图", "走势图", "折线图",
+                      "热力图", "柱状图", "排名图", "对比图", "雷达图", "仪表盘",
+                      "诊断图", "可视化", "可视化图表"]
+    return any(kw in user_msg for kw in chart_keywords)
+
+
 def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
     """主对话函数，处理 Function Calling 循环"""
     if not client:
@@ -250,7 +274,8 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
     if any(kw in user_msg for kw in data_keywords):
         full_messages.insert(1, {
             "role": "system",
-            "content": "用户问的是业务数据问题，你必须调用合适的工具来查询真实数据，不能只靠自己的知识回答。",
+            "content": "用户问的是业务数据问题，调用合适的工具来查询真实数据，如果用户要求看或者明确要求要图的时候就调用画图工具，其余情况下"
+                       "采用正常的文本回答，所有结果不能只靠自己的知识回答。",
         })
 
     try:
@@ -372,9 +397,12 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                         f"前200字: >>>{(raw_content or '')[:200]}<<<")
 
             parsed = _parse_response(raw_content)
-            # Merge direct blocks (charts) at front of response, then dedup
-            all_blocks = direct_blocks + parsed.get("blocks", [])
-            parsed["blocks"] = _dedup_chart_blocks(all_blocks)
+            # Merge direct blocks (charts) — only if user explicitly wants charts
+            wants_chart = _user_wants_chart(user_msg)
+            if wants_chart:
+                all_blocks = direct_blocks + parsed.get("blocks", [])
+                parsed["blocks"] = _dedup_chart_blocks(all_blocks)
+            # else: LLM may have put blocks in its own response, respect that
             return parsed
 
         # LLM 没调工具：如果是数据类问题，强制重试一次
@@ -450,8 +478,10 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                     extra_body={"thinking": {"type": "disabled"}},
                 )
                 parsed = _parse_response(resp2.choices[0].message.content)
-                all_blocks = direct_blocks + parsed.get("blocks", [])
-                parsed["blocks"] = _dedup_chart_blocks(all_blocks)
+                wants_chart = _user_wants_chart(user_msg)
+                if wants_chart:
+                    all_blocks = direct_blocks + parsed.get("blocks", [])
+                    parsed["blocks"] = _dedup_chart_blocks(all_blocks)
                 return parsed
 
             else:

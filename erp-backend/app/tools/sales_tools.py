@@ -10,7 +10,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "query_sales_history",
-            "description": "查询销售历史数据，返回按日期聚合的销量和金额。可按产品筛选、设定回溯天数",
+            "description": "查询销售数据，包括销量、销售金额、卖了多少、什么卖得好等。返回按日期聚合的销量和金额，可按产品筛选、设定回溯天数。用户问销量相关数值问题时优先使用此工具，不要用 render_sales_trend",
             "parameters": {
                 "type": "object",
                 "properties": {

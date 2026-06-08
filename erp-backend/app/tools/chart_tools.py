@@ -16,7 +16,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "render_inventory_heatmap",
-            "description": "生成库存热力图(ECharts)，展示各仓库×各产品的库存状态，用颜色深浅表示缺货严重程度。当用户询问库存风险、低库存产品时调用",
+            "description": "生成库存热力图(ECharts)，用颜色深浅表示缺货严重程度。仅在用户明确要求看库存图、热力图时调用。如果用户只是问库存数量或低库存产品，应使用 query_inventory",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -24,15 +24,21 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "render_sales_trend",
-            "description": "生成销售趋势折线图(ECharts)，展示近6个月月度销量趋势及预测。当用户询问销售趋势、销量走势、历史销量时调用",
-            "parameters": {"type": "object", "properties": {}, "required": []},
+            "description": "生成销售趋势折线图(ECharts)，展示近6个月月度销量趋势及预测。仅在用户明确要求看趋势图、走势图、折线图时调用。如果用户只是问销量多少、卖了多少，应使用 query_sales_history",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "product_id": {"type": "integer", "description": "产品ID，可选，不传则展示全部产品汇总"},
+                },
+                "required": [],
+            },
         },
     },
     {
         "type": "function",
         "function": {
             "name": "render_supplier_ranking",
-            "description": "生成供应商评分对比柱状图(ECharts)，支持多维度切换(质量/交付/价格/服务/综合/交付率/收货率)。当用户询问供应商排名、供应商对比时调用",
+            "description": "生成供应商评分对比柱状图(ECharts)，支持多维度切换(质量/交付/价格/服务/综合/交付率/收货率)。仅在用户明确要求看供应商排名图、对比图时调用。如果用户只是问供应商信息或评分，应使用 query_suppliers",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -71,7 +77,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "render_comprehensive_diagnosis",
-            "description": "生成供应链综合诊断图表，包含健康评分雷达图、综合仪表盘和各维度分析表格。当用户询问综合诊断、供应链状况、全链路分析时调用",
+            "description": "生成供应链综合诊断图表，包含健康评分雷达图、综合仪表盘和各维度分析表格。仅在用户明确要求看诊断图、供应链仪表盘时调用",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -79,7 +85,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "render_purchase_advice",
-            "description": "生成采购建议图表，包含补货清单柱状图、推荐供应商表格和费用估算。当用户询问采购建议、补货推荐、需要采购什么时调用",
+            "description": "生成采购建议图表，包含补货清单柱状图、推荐供应商表格和费用估算。仅在用户明确要求看采购建议图时调用。如果用户只是问需要采购什么，应使用 recommend_restock",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -118,7 +124,7 @@ def execute(name: str, args: dict, db: Session) -> dict | None:
     if name == "render_inventory_heatmap":
         return _render_inventory_heatmap(db)
     if name == "render_sales_trend":
-        return _render_sales_trend(db)
+        return _render_sales_trend(args, db)
     if name == "render_supplier_ranking":
         return _render_supplier_ranking(db)
     if name == "recommend_restock":
@@ -289,12 +295,12 @@ def _render_inventory_heatmap(db: Session) -> dict:
 
 # ── 2. Sales Trend ────────────────────────────────────────────────────
 
-def _render_sales_trend(db: Session) -> dict:
-    """返回销售趋势折线图 chart block"""
+def _render_sales_trend(args: dict, db: Session) -> dict:
+    """返回销售趋势折线图 chart block，支持按产品筛选"""
     six_months_ago = date.today() - timedelta(days=180)
     date_fmt = func.date_format(SaleOrder.order_date, "%Y-%m")
 
-    rows = (
+    q = (
         db.query(
             date_fmt.label("month"),
             func.sum(SaleOrderItem.quantity).label("qty"),
@@ -302,10 +308,18 @@ def _render_sales_trend(db: Session) -> dict:
         )
         .join(SaleOrderItem, SaleOrderItem.order_id == SaleOrder.id)
         .filter(SaleOrder.order_date >= six_months_ago, SaleOrder.status != "cancelled")
-        .group_by(date_fmt)
-        .order_by(date_fmt)
-        .all()
     )
+    product_id = args.get("product_id")
+    if product_id:
+        q = q.filter(SaleOrderItem.product_id == product_id)
+    rows = q.group_by(date_fmt).order_by(date_fmt).all()
+
+    # Get product name for title if filtered
+    product_name = None
+    if product_id:
+        prod = db.query(Product).filter(Product.id == product_id).first()
+        if prod:
+            product_name = prod.name
 
     if not rows:
         return {
@@ -341,7 +355,7 @@ def _render_sales_trend(db: Session) -> dict:
         "chartType": "line",
         "data": {
             "title": {
-                "text": "月度销售趋势（近6个月 + 预测）",
+                "text": f"{'%s - ' % product_name if product_name else ''}月度销售趋势（近6个月 + 预测）",
                 "left": "center",
                 "textStyle": {"fontSize": 14, "fontWeight": "bold"},
             },
