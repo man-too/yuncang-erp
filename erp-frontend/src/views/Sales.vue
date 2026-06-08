@@ -140,7 +140,7 @@
         </el-table-column>
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" text @click="viewSODetail(row)">编辑</el-button>
+            <el-button size="small" text @click="viewSODetail(row)">查看</el-button>
             <el-button size="small" type="danger" text @click="handleDeleteSO(row.id)">删除</el-button>
           </template>
         </el-table-column>
@@ -236,7 +236,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, shallowReactive } from 'vue'
+import { ref, onMounted, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { saleApi, productApi, inventoryApi } from '@/api'
 
@@ -260,13 +260,13 @@ const selectedSORows = ref<any[]>([])
 const cTableRef = ref()
 const soTableRef = ref()
 
-const cForm = shallowReactive({ code: '', name: '', contact_person: '', phone: '', email: '', address: '', tax_id: '', credit_limit: 0, remark: '' })
-const soForm = shallowReactive({ customer_id: null, expected_delivery_date: null, remark: '', items: [] as any[] })
-const outboundForm = shallowReactive({ warehouse_id: null, remark: '' })
+const cForm = reactive({ code: '', name: '', contact_person: '', phone: '', email: '', address: '', tax_id: '', credit_limit: 0, remark: '' })
+const soForm = reactive({ customer_id: null, expected_delivery_date: null, remark: '', items: [] as any[] })
+const outboundForm = reactive({ warehouse_id: null, remark: '' })
 
 // Filter state
-const cFilters = shallowReactive({ keyword: '', contact: '', is_active: null, credit_min: null, credit_max: null })
-const soFilters = shallowReactive({ keyword: '', status: '', customer_id: null, amount_min: null, amount_max: null, date_range: null })
+const cFilters = reactive({ keyword: '', contact: '', is_active: null, credit_min: null, credit_max: null })
+const soFilters = reactive({ keyword: '', status: '', customer_id: null, amount_min: null, amount_max: null, date_range: null })
 
 const soStatusType = (s: string) => ({ draft: 'info', pending_approval: 'warning', approved: 'primary', partially_shipped: '', completed: 'success', cancelled: 'danger' }[s] || 'info')
 const soStatusLabel = (s: string) => ({ draft: '草稿', pending_approval: '待审批', approved: '已审批', partially_shipped: '部分发货', completed: '已完成', cancelled: '已取消' }[s] || s)
@@ -386,14 +386,18 @@ const openEditCustomerDialog = (row: any) => {
 }
 
 const handleSaveCustomer = async () => {
-  if (cIsEdit.value) {
-    await saleApi.customers.update(cEditId.value, cForm)
-  } else {
-    await saleApi.customers.create(cForm)
+  try {
+    if (cIsEdit.value) {
+      await saleApi.customers.update(cEditId.value, cForm)
+    } else {
+      await saleApi.customers.create(cForm)
+    }
+    ElMessage.success('保存成功')
+    cDialogVisible.value = false
+    fetchCustomers()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '保存失败')
   }
-  ElMessage.success('保存成功')
-  cDialogVisible.value = false
-  fetchCustomers()
 }
 
 const handleCustomerSearch = () => {
@@ -441,10 +445,14 @@ const handleCreateSO = async () => {
     ElMessage.warning('请选择客户并添加明细')
     return
   }
-  await saleApi.orders.create(soForm)
-  ElMessage.success('创建成功')
-  soDialogVisible.value = false
-  fetchSO()
+  try {
+    await saleApi.orders.create(soForm)
+    ElMessage.success('创建成功')
+    soDialogVisible.value = false
+    fetchSO()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '创建失败')
+  }
 }
 
 const openOutbound = (orderId: number) => {
@@ -456,10 +464,14 @@ const openOutbound = (orderId: number) => {
 
 const handleOutbound = async () => {
   if (!outboundForm.warehouse_id) { ElMessage.warning('请选择仓库'); return }
-  await saleApi.outbound({ ...outboundForm, order_id: outboundOrderId.value })
-  ElMessage.success('出库成功')
-  outboundVisible.value = false
-  fetchSO()
+  try {
+    await saleApi.outbound({ ...outboundForm, order_id: outboundOrderId.value })
+    ElMessage.success('出库成功')
+    outboundVisible.value = false
+    fetchSO()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '出库失败')
+  }
 }
 
 const viewSODetail = async (order: any) => {

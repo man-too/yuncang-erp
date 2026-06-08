@@ -64,9 +64,22 @@ const router = createRouter({
 })
 
 // 路由守卫
+function isTokenValid(token: string): boolean {
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return false
+    const payload = JSON.parse(atob(parts[1]))
+    return payload.exp * 1000 > Date.now()
+  } catch {
+    return false
+  }
+}
+
 router.beforeEach((to, _from, next) => {
   const token = localStorage.getItem('token')
-  if (to.name !== 'Login' && !token) {
+  if (to.name !== 'Login' && (!token || !isTokenValid(token))) {
+    localStorage.removeItem('token')
+    localStorage.removeItem('username')
     next({ name: 'Login' })
   } else {
     next()

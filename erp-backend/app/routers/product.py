@@ -11,6 +11,7 @@ from app.models.inventory import Inventory
 from app.schemas.business import ProductCreate, ProductUpdate, ProductResponse, ProductCategoryCreate
 from app.routers.auth import get_current_user
 from app.models.user import User
+from app.utils.helpers import escape_ilike
 
 router = APIRouter(prefix="/api/products", tags=["产品管理"])
 
@@ -33,9 +34,9 @@ def list_products(
     query = db.query(Product)
     if keyword:
         query = query.filter(
-            Product.name.ilike(f"%{keyword}%")
-            | Product.code.ilike(f"%{keyword}%")
-            | Product.specification.ilike(f"%{keyword}%")
+            Product.name.ilike(f"%{escape_ilike(keyword)}%")
+            | Product.code.ilike(f"%{escape_ilike(keyword)}%")
+            | Product.specification.ilike(f"%{escape_ilike(keyword)}%")
         )
     if category_id is not None:
         query = query.filter(Product.category_id == category_id)

@@ -47,7 +47,7 @@
       <!-- 顶部栏 — 白底+底边框 -->
       <el-header class="app-header">
         <div class="header-left">
-          <el-button :icon="isCollapse ? 'Expand' : 'Fold'" text class="header-collapse-btn" @click="toggleCollapse" />
+          <el-button :icon="isCollapse ? Expand : Fold" text class="header-collapse-btn" @click="toggleCollapse" />
           <el-breadcrumb separator="/" class="header-breadcrumb">
             <el-breadcrumb-item :to="{ path: '/dashboard' }">首页</el-breadcrumb-item>
             <el-breadcrumb-item v-if="route.meta.title">{{ route.meta.title }}</el-breadcrumb-item>
@@ -80,6 +80,7 @@
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
+import { Expand, Fold } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()

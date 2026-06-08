@@ -149,7 +149,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, shallowReactive } from 'vue'
+import { ref, onMounted, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { supplierApi } from '@/api'
 
@@ -165,12 +165,12 @@ const editId = ref(0)
 const selectedRows = ref<any[]>([])
 const tableRef = ref()
 
-const form = shallowReactive({
+const form = reactive({
   code: '', name: '', contact_person: '', phone: '', email: '',
   address: '', tax_id: '', payment_terms: '', delivery_lead_time: 7, remark: '',
 })
 
-const filters = shallowReactive({
+const filters = reactive({
   keyword: '',
   status: '',
   contact: '',

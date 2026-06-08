@@ -10,6 +10,7 @@ from app.models.product import Product
 from app.schemas.business import WarehouseCreate, InventoryAdjustment
 from app.routers.auth import get_current_user
 from app.models.user import User
+from app.utils.helpers import escape_ilike
 
 router = APIRouter(prefix="/api/inventory", tags=["库存管理"])
 
@@ -56,7 +57,7 @@ def list_stock(
     query = db.query(Inventory, Product).join(Product, Inventory.product_id == Product.id)
     if keyword:
         query = query.filter(
-            Product.name.ilike(f"%{keyword}%") | Product.code.ilike(f"%{keyword}%")
+            Product.name.ilike(f"%{escape_ilike(keyword)}%") | Product.code.ilike(f"%{escape_ilike(keyword)}%")
         )
     if warehouse_id:
         query = query.filter(Inventory.warehouse_id == warehouse_id)
@@ -177,7 +178,7 @@ def list_alerts(
         query = query.filter(InventoryAlert.is_resolved == resolved)
     if keyword:
         query = query.filter(
-            Product.name.ilike(f"%{keyword}%") | Product.code.ilike(f"%{keyword}%")
+            Product.name.ilike(f"%{escape_ilike(keyword)}%") | Product.code.ilike(f"%{escape_ilike(keyword)}%")
         )
 
     total = query.count()
@@ -343,7 +344,7 @@ def list_low_stock(
     )
     if keyword:
         query = query.filter(
-            Product.name.ilike(f"%{keyword}%") | Product.code.ilike(f"%{keyword}%")
+            Product.name.ilike(f"%{escape_ilike(keyword)}%") | Product.code.ilike(f"%{escape_ilike(keyword)}%")
         )
     if warehouse_id:
         query = query.filter(Inventory.warehouse_id == warehouse_id)

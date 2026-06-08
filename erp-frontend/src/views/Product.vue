@@ -163,7 +163,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, shallowReactive } from 'vue'
+import { ref, onMounted, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { productApi } from '@/api'
 
@@ -180,7 +180,7 @@ const editId = ref(0)
 const selectedRows = ref<any[]>([])
 const tableRef = ref()
 
-const filters = shallowReactive({
+const filters = reactive({
   keyword: '',
   category_id: null,
   is_active: null,
@@ -191,7 +191,7 @@ const filters = shallowReactive({
   sale_price_max: null,
 })
 
-const form = shallowReactive({
+const form = reactive({
   code: '', name: '', specification: '', unit: '个',
   purchase_price: 0, sale_price: 0, cost_price: 0,
   min_stock: 0, max_stock: 0, barcode: '', remark: '',
@@ -206,7 +206,15 @@ const handleSizeChange = (val: number) => {
 const fetchData = async () => {
   loading.value = true
   try {
-    const params: any = { page: page.value, page_size: pageSize.value, ...filters }
+    const params: any = { page: page.value, page_size: pageSize.value }
+    if (filters.keyword) params.keyword = filters.keyword
+    if (filters.category_id !== null) params.category_id = filters.category_id
+    if (filters.is_active !== null) params.is_active = filters.is_active
+    if (filters.unit) params.unit = filters.unit
+    if (filters.price_min !== null) params.price_min = filters.price_min
+    if (filters.price_max !== null) params.price_max = filters.price_max
+    if (filters.sale_price_min !== null) params.sale_price_min = filters.sale_price_min
+    if (filters.sale_price_max !== null) params.sale_price_max = filters.sale_price_max
     const res: any = await productApi.list(params)
     products.value = res.items || []
     total.value = res.total || 0

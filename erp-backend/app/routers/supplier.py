@@ -1,4 +1,5 @@
 """供应商管理路由"""
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -9,6 +10,7 @@ from app.models.purchase import PurchaseOrder
 from app.schemas.business import SupplierCreate, SupplierUpdate, SupplierResponse
 from app.routers.auth import get_current_user
 from app.models.user import User
+from app.utils.helpers import escape_ilike
 
 router = APIRouter(prefix="/api/suppliers", tags=["供应商管理"])
 
@@ -29,18 +31,18 @@ def list_suppliers(
     query = db.query(Supplier)
     if keyword:
         query = query.filter(
-            Supplier.name.ilike(f"%{keyword}%") | Supplier.code.ilike(f"%{keyword}%")
+            Supplier.name.ilike(f"%{escape_ilike(keyword)}%") | Supplier.code.ilike(f"%{escape_ilike(keyword)}%")
         )
     if contact:
-        query = query.filter(Supplier.contact_person.ilike(f"%{contact}%"))
+        query = query.filter(Supplier.contact_person.ilike(f"%{escape_ilike(contact)}%"))
     if status:
         query = query.filter(Supplier.status == status)
     if min_rating is not None:
         query = query.filter(Supplier.rating >= min_rating)
     if date_from:
-        query = query.filter(Supplier.created_at >= date_from)
+        query = query.filter(Supplier.created_at >= datetime.fromisoformat(date_from))
     if date_to:
-        query = query.filter(Supplier.created_at <= f"{date_to} 23:59:59")
+        query = query.filter(Supplier.created_at <= datetime.fromisoformat(f"{date_to}T23:59:59"))
 
     total = query.count()
     items = query.order_by(Supplier.id.desc()).offset((page - 1) * page_size).limit(page_size).all()

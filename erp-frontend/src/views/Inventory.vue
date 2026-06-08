@@ -149,7 +149,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, shallowReactive } from 'vue'
+import { ref, onMounted, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { inventoryApi, productApi } from '@/api'
 
@@ -167,10 +167,10 @@ const tableRef = ref()
 
 const warehouses = ref<any[]>([])
 const categories = ref<any[]>([])
-const filters = shallowReactive({ keyword: '', warehouse_id: null, stock_status: '', category_id: null, qty_min: null, qty_max: null })
+const filters = reactive({ keyword: '', warehouse_id: null, stock_status: '', category_id: null, qty_min: null, qty_max: null })
 
-const whForm = shallowReactive({ code: '', name: '', address: '', manager: '' })
-const adjustForm = shallowReactive({ product_id: 0, warehouse_id: 1, current_qty: 0, new_quantity: 0, remark: '' })
+const whForm = reactive({ code: '', name: '', address: '', manager: '' })
+const adjustForm = reactive({ product_id: 0, warehouse_id: 1, current_qty: 0, new_quantity: 0, remark: '' })
 
 const handleSizeChange = (val: number) => {
   pageSize.value = val
@@ -252,8 +252,12 @@ const handleImport = () => {
 }
 
 const fetchAlerts = async () => {
-  const res: any = await inventoryApi.alerts({ resolved: false })
-  alerts.value = res || []
+  try {
+    const res: any = await inventoryApi.alerts({ resolved: false })
+    alerts.value = res.items || res || []
+  } catch {
+    alerts.value = []
+  }
 }
 
 const openWarehouseDialog = () => {
@@ -262,9 +266,13 @@ const openWarehouseDialog = () => {
 }
 
 const handleCreateWarehouse = async () => {
-  await inventoryApi.warehouses.create(whForm)
-  ElMessage.success('仓库创建成功')
-  whDialogVisible.value = false
+  try {
+    await inventoryApi.warehouses.create(whForm)
+    ElMessage.success('仓库创建成功')
+    whDialogVisible.value = false
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '创建失败')
+  }
 }
 
 const openAdjust = (row: any) => {
@@ -277,16 +285,24 @@ const openAdjust = (row: any) => {
 }
 
 const handleAdjust = async () => {
-  await inventoryApi.adjust(adjustForm)
-  ElMessage.success('调整成功')
-  adjustVisible.value = false
-  fetchStock()
+  try {
+    await inventoryApi.adjust(adjustForm)
+    ElMessage.success('调整成功')
+    adjustVisible.value = false
+    fetchStock()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '调整失败')
+  }
 }
 
 const handleResolve = async (id: number) => {
-  await inventoryApi.resolveAlert(id)
-  ElMessage.success('已处理')
-  fetchAlerts()
+  try {
+    await inventoryApi.resolveAlert(id)
+    ElMessage.success('已处理')
+    fetchAlerts()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '处理失败')
+  }
 }
 
 onMounted(async () => {

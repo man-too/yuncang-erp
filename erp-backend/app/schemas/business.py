@@ -1,6 +1,6 @@
 """业务模块 Pydantic schemas"""
 from datetime import date, datetime
-from typing import Optional
+from typing import Optional, Literal
 from pydantic import BaseModel
 
 
@@ -25,7 +25,7 @@ class SupplierUpdate(BaseModel):
     email: Optional[str] = None
     address: Optional[str] = None
     tax_id: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[Literal["active", "inactive", "pending", "blacklisted"]] = None
     payment_terms: Optional[str] = None
     delivery_lead_time: Optional[int] = None
     remark: Optional[str] = None
@@ -105,11 +105,17 @@ class ProductCategoryCreate(BaseModel):
 
 
 # ========== 采购 ==========
+class OrderItemCreate(BaseModel):
+    product_id: int
+    quantity: float = 1
+    unit_price: float = 0
+
+
 class PurchaseOrderCreate(BaseModel):
     supplier_id: int
     expected_delivery_date: Optional[date] = None
     remark: str = ""
-    items: list[dict]  # [{"product_id": 1, "quantity": 10, "unit_price": 100}]
+    items: list[OrderItemCreate]
 
 
 class PurchaseOrderResponse(BaseModel):
@@ -176,7 +182,7 @@ class SaleOrderCreate(BaseModel):
     customer_id: int
     expected_delivery_date: Optional[date] = None
     remark: str = ""
-    items: list[dict]
+    items: list[OrderItemCreate]
 
 
 class SaleOrderResponse(BaseModel):

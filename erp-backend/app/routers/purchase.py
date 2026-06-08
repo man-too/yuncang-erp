@@ -11,6 +11,7 @@ from app.models.product import Product
 from app.schemas.business import PurchaseOrderCreate, PurchaseInboundCreate, PurchaseOrderResponse
 from app.routers.auth import get_current_user
 from app.models.user import User
+from app.utils.helpers import escape_ilike
 
 router = APIRouter(prefix="/api/purchase", tags=["采购管理"])
 
@@ -48,7 +49,7 @@ def list_orders(
 ):
     query = db.query(PurchaseOrder)
     if keyword:
-        query = query.filter(PurchaseOrder.order_no.ilike(f"%{keyword}%"))
+        query = query.filter(PurchaseOrder.order_no.ilike(f"%{escape_ilike(keyword)}%"))
     if status:
         query = query.filter(PurchaseOrder.status == status)
     if supplier_id:
@@ -81,11 +82,11 @@ def get_order(order_id: int, db: Session = Depends(get_db), _user: User = Depend
 
 @router.post("/orders")
 def create_order(req: PurchaseOrderCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    total = sum(item["quantity"] * item["unit_price"] for item in req.items)
+    total = sum(item.quantity * item.unit_price for item in req.items)
     order = PurchaseOrder(
         order_no=generate_order_no(db),
         supplier_id=req.supplier_id,
-        status="draft",
+        status=PurchaseOrderStatus.DRAFT,
         expected_delivery_date=req.expected_delivery_date,
         total_amount=total,
         creator_id=user.id,
@@ -97,10 +98,10 @@ def create_order(req: PurchaseOrderCreate, db: Session = Depends(get_db), user: 
     for item in req.items:
         db.add(PurchaseOrderItem(
             order_id=order.id,
-            product_id=item["product_id"],
-            quantity=item["quantity"],
-            unit_price=item["unit_price"],
-            total_price=item["quantity"] * item["unit_price"],
+            product_id=item.product_id,
+            quantity=item.quantity,
+            unit_price=item.unit_price,
+            total_price=item.quantity * item.unit_price,
         ))
     db.commit()
     db.refresh(order)
@@ -112,9 +113,9 @@ def approve_order(order_id: int, db: Session = Depends(get_db), user: User = Dep
     order = db.query(PurchaseOrder).filter(PurchaseOrder.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="订单不存在")
-    if order.status != "draft" and order.status != "pending_approval":
+    if order.status not in (PurchaseOrderStatus.DRAFT, PurchaseOrderStatus.PENDING_APPROVAL):
         raise HTTPException(status_code=400, detail="当前状态不允许审批")
-    order.status = "approved"
+    order.status = PurchaseOrderStatus.APPROVED
     order.approver_id = user.id
     db.commit()
     return {"message": "审批通过"}
@@ -125,7 +126,7 @@ def delete_order(order_id: int, db: Session = Depends(get_db), _user: User = Dep
     order = db.query(PurchaseOrder).filter(PurchaseOrder.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="订单不存在")
-    if order.status not in ("draft", "cancelled"):
+    if order.status not in (PurchaseOrderStatus.DRAFT, PurchaseOrderStatus.CANCELLED):
         raise HTTPException(status_code=400, detail="仅草稿或已取消的订单可删除")
     db.query(PurchaseOrderItem).filter(PurchaseOrderItem.order_id == order_id).delete()
     db.delete(order)

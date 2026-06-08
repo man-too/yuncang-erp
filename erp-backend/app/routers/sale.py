@@ -10,6 +10,7 @@ from app.models.inventory import Inventory, InventoryRecord
 from app.schemas.business import CustomerCreate, CustomerUpdate, SaleOrderCreate, SaleOutboundCreate
 from app.routers.auth import get_current_user
 from app.models.user import User
+from app.utils.helpers import escape_ilike
 
 router = APIRouter(prefix="/api/sales", tags=["销售管理"])
 
@@ -30,10 +31,10 @@ def list_customers(
     query = db.query(Customer)
     if keyword:
         query = query.filter(
-            Customer.name.ilike(f"%{keyword}%") | Customer.code.ilike(f"%{keyword}%")
+            Customer.name.ilike(f"%{escape_ilike(keyword)}%") | Customer.code.ilike(f"%{escape_ilike(keyword)}%")
         )
     if contact:
-        query = query.filter(Customer.contact_person.ilike(f"%{contact}%"))
+        query = query.filter(Customer.contact_person.ilike(f"%{escape_ilike(contact)}%"))
     if is_active is not None:
         query = query.filter(Customer.is_active == is_active)
     if credit_min is not None:
@@ -112,7 +113,7 @@ def list_sale_orders(
 ):
     query = db.query(SaleOrder)
     if keyword:
-        query = query.filter(SaleOrder.order_no.ilike(f"%{keyword}%"))
+        query = query.filter(SaleOrder.order_no.ilike(f"%{escape_ilike(keyword)}%"))
     if status:
         query = query.filter(SaleOrder.status == status)
     if customer_id:
@@ -141,7 +142,7 @@ def get_sale_order(order_id: int, db: Session = Depends(get_db), _user: User = D
 
 @router.post("/orders")
 def create_sale_order(req: SaleOrderCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    total = sum(item["quantity"] * item["unit_price"] for item in req.items)
+    total = sum(item.quantity * item.unit_price for item in req.items)
     order = SaleOrder(
         order_no=generate_so_no(db),
         customer_id=req.customer_id,
@@ -156,18 +157,18 @@ def create_sale_order(req: SaleOrderCreate, db: Session = Depends(get_db), user:
     for item in req.items:
         # 锁定库存
         inv = db.query(Inventory).filter(
-            Inventory.product_id == item["product_id"],
-            Inventory.warehouse_id == item.get("warehouse_id", 1),
+            Inventory.product_id == item.product_id,
+            Inventory.warehouse_id == 1,
         ).first()
-        if inv and inv.available_quantity < item["quantity"]:
-            raise HTTPException(status_code=400, detail=f"产品 {item['product_id']} 库存不足")
+        if inv and inv.available_quantity < item.quantity:
+            raise HTTPException(status_code=400, detail=f"产品 {item.product_id} 库存不足")
 
         db.add(SaleOrderItem(
             order_id=order.id,
-            product_id=item["product_id"],
-            quantity=item["quantity"],
-            unit_price=item["unit_price"],
-            total_price=item["quantity"] * item["unit_price"],
+            product_id=item.product_id,
+            quantity=item.quantity,
+            unit_price=item.unit_price,
+            total_price=item.quantity * item.unit_price,
         ))
 
     db.commit()
@@ -180,7 +181,7 @@ def delete_sale_order(order_id: int, db: Session = Depends(get_db), _user: User 
     order = db.query(SaleOrder).filter(SaleOrder.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="订单不存在")
-    if order.status not in ("draft", "cancelled"):
+    if order.status not in (SaleOrderStatus.DRAFT, SaleOrderStatus.CANCELLED):
         raise HTTPException(status_code=400, detail="仅草稿或已取消的订单可删除")
     db.query(SaleOrderItem).filter(SaleOrderItem.order_id == order_id).delete()
     db.delete(order)

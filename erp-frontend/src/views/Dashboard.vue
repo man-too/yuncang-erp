@@ -66,21 +66,23 @@ const statCards = ref([
 const aiHistory = ref<any[]>([])
 
 onMounted(async () => {
+  const [suppliers, products, orders, aiDash] = await Promise.allSettled([
+    supplierApi.list({ page: 1, page_size: 1 }),
+    productApi.list({ page: 1, page_size: 1 }),
+    purchaseApi.list({ page: 1, page_size: 1 }),
+    aiApi.dashboard(),
+  ])
+
+  if (suppliers.status === 'fulfilled') statCards.value[0].value = (suppliers.value as any).total || 0
+  if (products.status === 'fulfilled') statCards.value[1].value = (products.value as any).total || 0
+  if (orders.status === 'fulfilled') statCards.value[2].value = (orders.value as any).total || 0
+  if (aiDash.status === 'fulfilled') statCards.value[3].value = (aiDash.value as any)?.total_decisions || 0
+
   try {
-    const [suppliers, products, orders, aiDash] = await Promise.all([
-      supplierApi.list({ page: 1, page_size: 1 }),
-      productApi.list({ page: 1, page_size: 1 }),
-      purchaseApi.list({ page: 1, page_size: 1 }),
-      aiApi.dashboard(),
-    ]) as any[]
-
-    statCards.value[0].value = suppliers.total || 0
-    statCards.value[1].value = products.total || 0
-    statCards.value[2].value = orders.total || 0
-    statCards.value[3].value = aiDash?.total_decisions || 0
-
     const history: any = await aiApi.history({ limit: 5 })
     aiHistory.value = history || []
-  } catch (_) {}
+  } catch {
+    aiHistory.value = []
+  }
 })
 </script>

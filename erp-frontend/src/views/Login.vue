@@ -28,7 +28,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, shallowReactive } from 'vue'
+import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Box } from '@element-plus/icons-vue'
@@ -40,7 +40,7 @@ const formRef = ref<FormInstance>()
 const loading = ref(false)
 const isRegister = ref(false)
 
-const form = shallowReactive({
+const form = reactive({
   username: 'admin',
   password: 'admin123',
   email: '',
@@ -78,6 +78,8 @@ const handleLogin = async () => {
       ElMessage.success('登录成功')
       router.push('/dashboard')
     }
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '操作失败')
   } finally {
     loading.value = false
   }

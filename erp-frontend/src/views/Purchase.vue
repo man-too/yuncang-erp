@@ -190,7 +190,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, shallowReactive } from 'vue'
+import { ref, onMounted, computed, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { purchaseApi, supplierApi, productApi, inventoryApi } from '@/api'
 
@@ -212,7 +212,7 @@ const orderItems = ref<any[]>([])
 const selectedRows = ref<any[]>([])
 const tableRef = ref()
 
-const filters = shallowReactive({
+const filters = reactive({
   keyword: '',
   status: '',
   supplier_id: null,
@@ -221,14 +221,14 @@ const filters = shallowReactive({
   date_range: null,
 })
 
-const poForm = shallowReactive({
+const poForm = reactive({
   supplier_id: null,
   expected_delivery_date: null,
   remark: '',
   items: [] as any[],
 })
 
-const inboundForm = shallowReactive({
+const inboundForm = reactive({
   warehouse_id: null,
   remark: '',
 })
@@ -299,19 +299,26 @@ const buildFilterParams = () => {
 const fetchData = async () => {
   loading.value = true
   try {
-    const [orderRes, supRes, prodRes, whRes] = await Promise.all([
-      purchaseApi.list(buildFilterParams()),
+    const orderRes: any = await purchaseApi.list(buildFilterParams())
+    orders.value = orderRes.items || []
+    total.value = orderRes.total || 0
+  } finally {
+    loading.value = false
+  }
+}
+
+const fetchDropdowns = async () => {
+  try {
+    const [supRes, prodRes, whRes] = await Promise.all([
       supplierApi.list({ page: 1, page_size: 100 }),
       productApi.list({ page: 1, page_size: 100 }),
       inventoryApi.warehouses.list(),
     ]) as any[]
-    orders.value = orderRes.items || []
-    total.value = orderRes.total || 0
     suppliers.value = supRes.items || []
     products.value = prodRes.items || []
     warehouses.value = whRes || []
-  } finally {
-    loading.value = false
+  } catch {
+    // 下拉数据加载失败不影响主表
   }
 }
 
@@ -405,7 +412,10 @@ const viewDetail = async (order: any) => {
   } catch (_) {}
 }
 
-onMounted(fetchData)
+onMounted(() => {
+  fetchDropdowns()
+  fetchData()
+})
 </script>
 
 <style scoped>
