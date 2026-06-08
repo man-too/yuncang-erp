@@ -1,9 +1,12 @@
 """库存查询与风险分析工具"""
+from datetime import date, timedelta
+
+from sqlalchemy import func
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+
 from app.models.inventory import Inventory, Warehouse
 from app.models.product import Product
-from app.models.sale import SaleOrderItem, SaleOrder
+from app.models.sale import SaleOrder, SaleOrderItem
 
 
 def _warehouse_name(db: Session, wid: int) -> str:
@@ -58,7 +61,7 @@ def execute(name: str, args: dict, db: Session) -> dict | None:
 
 
 def _query_inventory(args: dict, db: Session) -> dict:
-    q = db.query(Inventory, Product, Warehouse).join(Product, Inventory.product_id == Product.id).outerjoin(Warehouse, Inventory.warehouse_id == Warehouse.id).filter(Warehouse.is_active == True)
+    q = db.query(Inventory, Product).join(Product, Inventory.product_id == Product.id)
 
     if args.get("product_id"):
         q = q.filter(Inventory.product_id == args["product_id"])
@@ -68,16 +71,44 @@ def _query_inventory(args: dict, db: Session) -> dict:
         q = q.filter(Inventory.quantity <= Product.min_stock)
 
     rows = q.limit(args.get("limit", 100)).all()
+
+    # 批量获取近30天日均销量，用 in_() 避免 N+1
+    inv_product_ids = list(set(prod.id for _, prod in rows))
+    daily_sales_map: dict[int, float] = {}
+    if inv_product_ids:
+        thirty_days_ago = date.today() - timedelta(days=30)
+        sales_rows = (
+            db.query(
+                SaleOrderItem.product_id,
+                func.sum(SaleOrderItem.quantity).label("total_qty"),
+            )
+            .join(SaleOrder, SaleOrder.id == SaleOrderItem.order_id)
+            .filter(
+                SaleOrderItem.product_id.in_(inv_product_ids),
+                SaleOrder.order_date >= thirty_days_ago,
+                SaleOrder.status != "cancelled",
+            )
+            .group_by(SaleOrderItem.product_id)
+            .all()
+        )
+        for pid, total_qty in sales_rows:
+            daily_sales_map[pid] = float(total_qty or 0) / 30.0
+
     items = []
-    for inv, prod, wh in rows:
+    for inv, prod in rows:
         ratio = inv.quantity / prod.min_stock if prod.min_stock > 0 else 999
+        daily_sales = daily_sales_map.get(prod.id, 0)
+        days_support = inv.quantity / daily_sales if daily_sales > 0 else 999
+
         if inv.quantity == 0:
             status = "缺货"
+        elif days_support < 7:
+            status = "严重不足"  # 撑不过7天，即使 ratio 正常也是高风险
         elif ratio < 0.5:
             status = "严重不足"
         elif ratio <= 1.0:
             status = "偏低"
-        elif ratio > 2.0:
+        elif ratio > 2.0 and daily_sales > 0 and days_support > 60:
             status = "偏高"
         else:
             status = "正常"
@@ -92,6 +123,8 @@ def _query_inventory(args: dict, db: Session) -> dict:
             "max_stock": float(prod.max_stock),
             "unit": prod.unit,
             "status": status,
+            "daily_sales": round(daily_sales, 2),
+            "days_support": round(days_support, 1),
         })
 
     return {"items": items, "total": len(items)}
@@ -108,25 +141,39 @@ def _analyze_stock_risk(args: dict, db: Session) -> dict:
 
     rows = q.limit(20).all()
 
-    results = []
-    for inv, prod in rows:
-        # Query recent 30-day sales for this product
-        recent = (
-            db.query(SaleOrderItem.quantity, SaleOrder.order_date)
+    # 批量查询所有相关产品的近30天销量（避免 N+1）
+    product_ids = [prod.id for _, prod in rows]
+    thirty_days_ago = date.today() - timedelta(days=30)
+    recent_sales_map: dict[int, list[dict]] = {}
+    if product_ids:
+        sales_rows = (
+            db.query(
+                SaleOrderItem.product_id,
+                SaleOrderItem.quantity,
+                SaleOrder.order_date,
+            )
             .join(SaleOrder, SaleOrder.id == SaleOrderItem.order_id)
-            .filter(SaleOrderItem.product_id == prod.id)
+            .filter(
+                SaleOrderItem.product_id.in_(product_ids),
+                SaleOrder.order_date >= thirty_days_ago,
+                SaleOrder.status != "cancelled",
+            )
             .order_by(SaleOrder.order_date.desc())
-            .limit(30)
             .all()
         )
-        recent_sales = [{"date": str(r[1]), "qty": float(r[0] or 0)} for r in recent]
+        for pid, qty, od in sales_rows:
+            if pid not in recent_sales_map:
+                recent_sales_map[pid] = []
+            recent_sales_map[pid].append({"date": str(od), "qty": float(qty or 0)})
 
+    results = []
+    for inv, prod in rows:
         ai = analyze_stock_alert(
             product_name=prod.name,
             current_qty=float(inv.quantity),
             min_stock=float(prod.min_stock),
             max_stock=float(prod.max_stock),
-            recent_sales=recent_sales,
+            recent_sales=recent_sales_map.get(prod.id, []),
         )
         results.append({
             "product_id": prod.id,

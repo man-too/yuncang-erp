@@ -1,5 +1,4 @@
 """销售历史与预测工具"""
-import random
 from datetime import date, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -60,7 +59,7 @@ def _query_sales_history(args: dict, db: Session) -> dict:
 
     if args.get("product_id"):
         q = q.filter(SaleOrderItem.product_id == args["product_id"])
-    q = q.filter(SaleOrder.order_date >= since)
+    q = q.filter(SaleOrder.order_date >= since, SaleOrder.status != "cancelled")
 
     if group_by == "month":
         date_label = func.date_format(SaleOrder.order_date, "%Y-%m")
@@ -82,27 +81,22 @@ def _query_sales_history(args: dict, db: Session) -> dict:
 
 
 def _wma_fallback(history: list[dict], days: int = 30, product_name: str | None = None) -> list[int]:
-    """加权移动平均回退预测：用最近7天数据，权重 [0.05, 0.08, 0.12, 0.15, 0.18, 0.22, 0.20]，加微波动"""
-    weights = [0.05, 0.08, 0.12, 0.15, 0.18, 0.22, 0.20]
+    """加权移动平均预测：最近7天数据，权重 [0.20, 0.22, 0.18, 0.15, 0.12, 0.08, 0.05]（最近→最远递减），>7天时每7天衰减0.98"""
+    weights = [0.20, 0.22, 0.18, 0.15, 0.12, 0.08, 0.05]  # 最近→最远，权重递减
     quantities = [h.get("quantity", 0) for h in history]
     recent = quantities[-7:]
     # Pad with earliest value if fewer than 7 data points
     while len(recent) < 7:
         recent.insert(0, recent[0] if recent else 0)
-    w = weights[-len(recent):]
+    w = weights[:len(recent)]  # 取前 len(recent) 个权重（最近数据对应最大权重）
     wma = sum(wi * val for wi, val in zip(w, recent)) / sum(w)
+    base = max(0, round(wma))
 
-    # Compute standard deviation for micro-volatility
-    avg = sum(recent) / len(recent)
-    std_dev = (sum((v - avg) ** 2 for v in recent) / len(recent)) ** 0.5
-    volatility = std_dev * 0.3
-
-    # Stable seeded random for reproducible micro-volatility (hash() is randomized per process in Python)
-    import hashlib
-    seed = int(hashlib.md5((product_name or "").encode()).hexdigest(), 16) % (2**32)
-    rng = random.Random(seed)
-
-    return [max(0, round(wma + rng.gauss(0, volatility))) for _ in range(days)]
+    predictions = []
+    for i in range(days):
+        decay = 0.98 ** (i // 7)  # 每7天衰减一次
+        predictions.append(max(0, round(base * decay)))
+    return predictions
 
 
 def _forecast_sales(args: dict, db: Session) -> dict:
