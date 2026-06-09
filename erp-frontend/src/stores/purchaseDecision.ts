@@ -256,21 +256,55 @@ export const usePurchaseDecisionStore = defineStore('purchaseDecision', () => {
 
   // Phase 3: 采购计划风险审核
   async function fetchAuditPlan() {
-    const items = selectedProducts.value.map(p => {
-      const supplierId = supplierChoices.value[p.product_id]?.[0]
-      const supplierName = supplierId ? (supplierInfo.value[supplierId]?.name || `供应商#${supplierId}`) : ''
-      const qty = quantities.value[p.product_id] || p.suggested_qty || 0
-      return {
-        product_id: p.product_id,
-        product_name: p.product_name,
-        quantity: qty,
-        supplier_id: supplierId || 0,
-        supplier_name: supplierName,
+    // 遍历所有产品 × 所有已配供应商，用 supplierQuantities（Step1 数据）
+    const items: Array<{ product_id: number; product_name: string; quantity: number; supplier_id: number; supplier_name: string }> = []
+
+    for (const p of allProducts.value) {
+      const allocations = supplierQuantities.value[p.product_id]
+      const choices = supplierChoices.value[p.product_id] || []
+
+      if (allocations && Object.keys(allocations).length > 0) {
+        // 有供应商分配量：为每个 product-supplier 组合生成审核项
+        for (const [sid, allocQty] of Object.entries(allocations)) {
+          const supplierName = supplierInfo.value[Number(sid)]?.name || `供应商#${sid}`
+          items.push({
+            product_id: p.product_id,
+            product_name: p.product_name,
+            quantity: allocQty as number,
+            supplier_id: Number(sid),
+            supplier_name: supplierName,
+          })
+        }
+      } else if (choices.length > 0) {
+        // 有供应商选择但无分配量：用量取 quantities 或 suggested_qty
+        for (const sid of choices) {
+          const qty = quantities.value[p.product_id] || p.suggested_qty || 0
+          const supplierName = supplierInfo.value[sid]?.name || `供应商#${sid}`
+          items.push({
+            product_id: p.product_id,
+            product_name: p.product_name,
+            quantity: qty,
+            supplier_id: sid,
+            supplier_name: supplierName,
+          })
+        }
+      } else {
+        // 无供应商：用 supplier_id = 0，不过滤掉
+        const qty = quantities.value[p.product_id] || p.suggested_qty || 0
+        if (qty > 0) {
+          items.push({
+            product_id: p.product_id,
+            product_name: p.product_name,
+            quantity: qty,
+            supplier_id: 0,
+            supplier_name: '未指定',
+          })
+        }
       }
-    }).filter(item => item.supplier_id > 0 && item.quantity > 0)
+    }
 
     if (items.length === 0) {
-      ElMessage.warning('请先完成供应商匹配和数量设置')
+      ElMessage.warning('请先添加需要采购的产品')
       return null
     }
 

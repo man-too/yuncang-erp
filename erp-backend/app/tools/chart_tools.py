@@ -119,6 +119,22 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "render_safety_stock_table",
+            "description": "生成安全库存分析表格，批量计算所有产品的再订货点(ROP)和安全库存，标注补货状态。仅在用户明确要求看安全库存、ROP分析、补货时机时调用",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "render_transfer_advice_table",
+            "description": "生成仓库间调拨建议表格，分析各仓库库存不平衡情况，推荐从富余仓库向短缺仓库调拨。仅在用户明确要求看调拨建议、仓库调拨时调用",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 
@@ -139,6 +155,10 @@ def execute(name: str, args: dict, db: Session) -> dict | None:
         return _render_purchase_advice(db)
     if name == "audit_purchase_plan":
         return _audit_purchase_plan(args, db)
+    if name == "render_safety_stock_table":
+        return _render_safety_stock_table(db)
+    if name == "render_transfer_advice_table":
+        return _render_transfer_advice_table(db)
     return None
 
 
@@ -1312,4 +1332,203 @@ def _audit_purchase_plan(args: dict, db: Session) -> dict:
         "product_risks": product_risks,
         "overall_risk": overall_risk,
         "action": action,
+    }
+
+
+# ── 9. Safety Stock Table ───────────────────────────────────────────────
+
+def _render_safety_stock_table(db: Session) -> dict:
+    """安全库存分析表格：批量计算所有产品的ROP和安全库存"""
+    from app.services.calculation_service import batch_calc_reorder_point
+    import math
+
+    # Query all active products
+    products = db.query(Product).filter(Product.is_active == True).all()
+    if not products:
+        return {
+            "_render": True,
+            "blocks": [{
+                "type": "table",
+                "columns": [{"key": "msg", "title": "提示"}],
+                "rows": [{"msg": "暂无活跃产品数据"}],
+            }],
+        }
+
+    # Get total inventory per product across all warehouses
+    inv_rows = (
+        db.query(
+            Inventory.product_id,
+            func.sum(Inventory.quantity).label("total_qty"),
+        )
+        .filter(Inventory.product_id.in_([p.id for p in products]))
+        .group_by(Inventory.product_id)
+        .all()
+    )
+    inv_map = {r.product_id: float(r.total_qty or 0) for r in inv_rows}
+
+    # Batch calculate ROP for all products
+    product_ids = [p.id for p in products]
+    rop_map = batch_calc_reorder_point(product_ids, db)
+
+    # Build table rows
+    table_rows = []
+    for prod in products:
+        current_qty = inv_map.get(prod.id, 0)
+        rop_info = rop_map.get(prod.id, {})
+        rop_val = rop_info.get("rop", 0)
+        safety = rop_info.get("safety_stock", 0)
+
+        # Determine status and suggested reorder qty
+        if current_qty < safety:
+            status = "紧急补货"
+            suggested = max(0, math.ceil(rop_val * 1.2 - current_qty))
+        elif current_qty < rop_val:
+            status = "建议补货"
+            suggested = max(0, math.ceil(rop_val - current_qty))
+        else:
+            status = "安全"
+            suggested = 0
+
+        table_rows.append({
+            "product_name": prod.name,
+            "current_qty": current_qty,
+            "ROP": round(rop_val, 1),
+            "safety_stock": round(safety, 1),
+            "suggested_reorder_qty": suggested,
+            "status": status,
+        })
+
+    # Sort: 紧急补货 first, then 建议补货, then 安全
+    status_order = {"紧急补货": 0, "建议补货": 1, "安全": 2}
+    table_rows.sort(key=lambda r: (status_order.get(r["status"], 9), r["current_qty"]))
+
+    return {
+        "_render": True,
+        "blocks": [{
+            "type": "table",
+            "columns": [
+                {"key": "product_name", "title": "产品"},
+                {"key": "current_qty", "title": "当前库存"},
+                {"key": "ROP", "title": "再订货点(ROP)"},
+                {"key": "safety_stock", "title": "安全库存"},
+                {"key": "suggested_reorder_qty", "title": "建议补货量"},
+                {"key": "status", "title": "状态"},
+            ],
+            "rows": table_rows,
+        }],
+    }
+
+
+# ── 10. Transfer Advice Table ───────────────────────────────────────────
+
+def _render_transfer_advice_table(db: Session) -> dict:
+    """仓库间调拨建议表格：分析各仓库库存不平衡，推荐调拨方案"""
+    from collections import defaultdict
+
+    # Query all inventory rows with product and warehouse info
+    rows = (
+        db.query(
+            Product.id.label("product_id"),
+            Product.name.label("product_name"),
+            Product.min_stock,
+            Product.max_stock,
+            Warehouse.id.label("warehouse_id"),
+            Warehouse.name.label("warehouse_name"),
+            Inventory.quantity,
+        )
+        .join(Inventory, Inventory.product_id == Product.id)
+        .join(Warehouse, Inventory.warehouse_id == Warehouse.id)
+        .filter(Product.is_active == True, Inventory.quantity >= 0)
+        .order_by(Product.id, Warehouse.id)
+        .all()
+    )
+
+    if not rows:
+        return {
+            "_render": True,
+            "blocks": [{
+                "type": "table",
+                "columns": [{"key": "msg", "title": "提示"}],
+                "rows": [{"msg": "暂无库存数据"}],
+            }],
+        }
+
+    # Group by product
+    product_warehouses: dict[int, list[dict]] = defaultdict(list)
+    for r in rows:
+        product_warehouses[r.product_id].append({
+            "product_name": r.product_name,
+            "warehouse_id": r.warehouse_id,
+            "warehouse_name": r.warehouse_name,
+            "quantity": float(r.quantity),
+            "min_stock": float(r.min_stock),
+            "max_stock": float(r.max_stock),
+        })
+
+    # Find transfer opportunities
+    transfer_advice: list[dict] = []
+    for pid, wh_list in product_warehouses.items():
+        # Find warehouses with excess (qty > max_stock)
+        excess_whs = [w for w in wh_list if w["quantity"] > w["max_stock"]]
+        # Find warehouses with shortage (qty < min_stock)
+        shortage_whs = [w for w in wh_list if w["quantity"] < w["min_stock"]]
+
+        if not excess_whs or not shortage_whs:
+            continue
+
+        # Sort excess by most excess first, shortage by most shortage first
+        excess_whs.sort(key=lambda w: w["quantity"] - w["max_stock"], reverse=True)
+        shortage_whs.sort(key=lambda w: w["min_stock"] - w["quantity"], reverse=True)
+
+        for short in shortage_whs:
+            needed = short["min_stock"] - short["quantity"]
+            for ex in excess_whs:
+                available = ex["quantity"] - ex["max_stock"]
+                if available <= 0:
+                    continue
+                transfer_qty = min(needed, available)
+                if transfer_qty <= 0:
+                    continue
+
+                reason = (
+                    f"{ex['warehouse_name']}库存({ex['quantity']:.0f})超过上限({ex['max_stock']:.0f})，"
+                    f"而{short['warehouse_name']}库存({short['quantity']:.0f})低于下限({short['min_stock']:.0f})"
+                )
+                transfer_advice.append({
+                    "product_name": short["product_name"],
+                    "from_warehouse": ex["warehouse_name"],
+                    "to_warehouse": short["warehouse_name"],
+                    "transfer_qty": int(transfer_qty),
+                    "reason": reason,
+                })
+
+                # Deduct transferred qty from excess warehouse for subsequent matching
+                ex["quantity"] -= transfer_qty
+                needed -= transfer_qty
+                if needed <= 0:
+                    break
+
+    if not transfer_advice:
+        return {
+            "_render": True,
+            "blocks": [{
+                "type": "table",
+                "columns": [{"key": "msg", "title": "提示"}],
+                "rows": [{"msg": "当前各仓库库存分布均衡，暂无调拨需求"}],
+            }],
+        }
+
+    return {
+        "_render": True,
+        "blocks": [{
+            "type": "table",
+            "columns": [
+                {"key": "product_name", "title": "产品"},
+                {"key": "from_warehouse", "title": "调出仓库"},
+                {"key": "to_warehouse", "title": "调入仓库"},
+                {"key": "transfer_qty", "title": "建议调拨量"},
+                {"key": "reason", "title": "原因说明"},
+            ],
+            "rows": transfer_advice,
+        }],
     }

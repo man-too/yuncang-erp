@@ -21,8 +21,8 @@ QUICK_ACTION_TOOLS = {
     "supplier_ranking": "render_supplier_ranking",
     "dashboard": "render_comprehensive_diagnosis",
     "purchase_advice": "render_purchase_advice",
-    "safety_stock": "render_inventory_heatmap",
-    "transfer_advice": "render_inventory_heatmap",  # 调拨基于库存热力图
+    "safety_stock": "render_safety_stock_table",
+    "transfer_advice": "render_transfer_advice_table",
 }
 
 

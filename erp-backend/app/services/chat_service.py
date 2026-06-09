@@ -336,8 +336,9 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                     "render_inventory_heatmap", "render_sales_trend",
                     "render_supplier_ranking",
                     "render_comprehensive_diagnosis", "render_purchase_advice",
+                    "render_safety_stock_table", "render_transfer_advice_table",
                 ):
-                    # Chart tools: execute, collect direct-render blocks, also feed to LLM
+                    # Chart/table render tools: execute, collect direct-render blocks, also feed to LLM
                     result = execute_tool(tc.function.name, args, db)
                     if isinstance(result, dict) and result.get("_render"):
                         if "blocks" in result:
@@ -454,7 +455,7 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                             "role": "tool", "tool_call_id": tc.id,
                             "content": json.dumps({"blocked": True, "message": "需用户确认"}, ensure_ascii=False)
                         })
-                    elif tc.function.name in ("render_inventory_heatmap", "render_sales_trend", "render_supplier_ranking", "render_comprehensive_diagnosis", "render_purchase_advice"):
+                    elif tc.function.name in ("render_inventory_heatmap", "render_sales_trend", "render_supplier_ranking", "render_comprehensive_diagnosis", "render_purchase_advice", "render_safety_stock_table", "render_transfer_advice_table"):
                         result = execute_tool(tc.function.name, args, db)
                         if isinstance(result, dict) and result.get("_render"):
                             if "blocks" in result:
