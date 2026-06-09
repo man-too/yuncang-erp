@@ -70,7 +70,7 @@ export const useChatStore = defineStore('chat', () => {
       conversationId.value = res.conversation_id || conversationId.value
       addMessage({
         role: 'assistant',
-        content: res.content || 'AI 处理完成，请查看上方图表数据。',
+        content: res.content || '数据已生成，请查看下方图表/表格。',
         blocks: (res.blocks || []).map((b: any) => normalizeBlock(b)),
       })
     } catch (e: any) {
@@ -195,7 +195,7 @@ export const useChatStore = defineStore('chat', () => {
 
       // Step 3: Merge — directBlocks first (charts), llmBlocks has action buttons etc.
       // Use LLM content if available, otherwise fallback to backend-generated analysis
-      const finalContent = llmContent || fallbackContent || '数据已加载，请查看上方图表。'
+      const finalContent = llmContent || fallbackContent || '数据已加载，请查看下方图表/表格。'
       addMessage({
         role: 'assistant',
         content: finalContent,

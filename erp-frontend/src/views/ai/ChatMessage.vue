@@ -188,7 +188,7 @@ function sanitizeContent(content: string, blocks: MessageBlock[]): { cleanConten
 
   cleanContent = cleanContent.trim()
   if (!cleanContent && extraBlocks.length > 0) {
-    cleanContent = '图表数据已生成，请查看下方图表。'
+    cleanContent = '数据已生成，请查看下方图表/表格。'
   }
 
   return { cleanContent, extraBlocks }

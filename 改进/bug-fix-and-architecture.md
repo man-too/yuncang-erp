@@ -128,3 +128,115 @@ Step 2: POST /api/ai/chat
 1. **快捷操作是否完全不走 LLM？** → 优点：秒级响应、省 token。缺点：分析文字是模板格式，不如 LLM 自然
 2. **LLM 第2轮是否去掉 tools 参数？** → 优点：防止再调工具。缺点：如果 LLM 第1轮只调了 query_* 没调 render，第2轮就没机会补调了
 3. **direct_blocks 是否完全删掉？** → 方案A：删掉，LLM统一输出 blocks。方案B（当前）：保留，始终合并。风险：方案A完全依赖LLM格式正确，格式出错图表就丢了
+
+---
+
+## 架构问题清单（待改进）
+
+### 🔴 问题 1：LLM 输出格式不稳定 — `_parse_response` 层层打补丁
+
+**现状**：要求 LLM 返回 `{"content": "...", "blocks": [...]}` 的严格 JSON，但 LLM 经常不听话：
+- 返回 ```json ... ``` 包裹的代码块
+- 在 JSON 前后加说明文字
+- 在 content 里嵌入 chart JSON（`_extract_embedded_chart_json` 专门处理）
+- 返回纯数组而非 dict（`try_parse` 的 list 分支）
+- 返回非 JSON 纯文本
+
+`_parse_response` 有 5 层解析：直接解析 → 去代码块 → 暴力搜索所有 `{}` → 提取 content 中嵌入的 chart JSON → 纯文本兜底。每层都是修一个 bug 加一层补丁。
+
+**风险**：解析越复杂，边界 case 越多。比如 content 里的 chart JSON 提取如果匹配到用户说的 `{"type":"chart"}` 这几个字就会误提取。
+
+**涉及文件**：`chat_service.py` 第 581-744 行
+
+---
+
+### 🔴 问题 2：LLM 第二轮仍传 `tools=ALL_TOOLS` — 可能再调工具
+
+**现状**：LLM 第二轮传了全部 23 个工具定义 + `tool_choice="auto"`，LLM 可能再调一次工具（比如调 `query_inventory` 查一遍已经在 render 结果里有的数据），白烧 token + 增加延迟。
+
+**最差路径**：用户说"看库存热力图" → LLM 第1轮调 render_heatmap → 第2轮 LLM 又调 query_inventory → 第3轮 LLM 才写分析 → **3 次 LLM 调用**。
+
+**建议**：LLM 第二轮不传 tools，或 `tool_choice="none"`，只让它写分析文字。
+
+**涉及文件**：`chat_service.py` 第 422-431 行、第 530-538 行
+
+---
+
+### 🟡 问题 3：SYSTEM_PROMPT 与 direct_blocks 指令矛盾
+
+**现状**：
+- SYSTEM_PROMPT 说 "blocks 必须包含工具返回的结构化数据"
+- 但 `_summarize_render_result` 告诉 LLM "你不需要在 blocks 中重复输出这些数据"
+- LLM 收到两条矛盾指令，行为不可预测
+
+**建议**：统一指令，明确 LLM 第二轮只需输出 content 分析文字，blocks 由系统自动处理。
+
+**涉及文件**：`chat_service.py` SYSTEM_PROMPT、`_summarize_render_result`
+
+---
+
+### 🟡 问题 4：`_dedup_chart_blocks` 只去重 chart，table 不去重
+
+**现状**：只按 chart title 去重。如果 direct_blocks 和 LLM 都输出了同一张 table，会重复展示。
+
+**建议**：对 table 也按列名+行数去重，或改为统一按内容 hash 去重。
+
+**涉及文件**：`chat_service.py` 第 560-578 行
+
+---
+
+### 🟡 问题 5：重试逻辑重复了整个工具执行流程
+
+**现状**：LLM 第1轮不调工具 → 检测是数据问题 → 加警告重试 → 重试后如果调了工具，**整个工具执行+LLM第2轮的代码又写了一遍**（line 499-544 几乎是 line 370-463 的复制粘贴）。
+
+**建议**：抽取为 `_execute_tools_and_summarize(tool_calls, db, creator_id)` 函数，两处调用同一个函数。
+
+**涉及文件**：`chat_service.py` 第 370-415 行 vs 第 499-528 行
+
+---
+
+### 🟡 问题 6：对话历史没有压缩 — token 越聊越多
+
+**现状**：每次对话把 `messages.value` 全部传给后端，后端再全传给 LLM。query_* 工具返回的完整 JSON 也存在对话历史里。聊了 10 轮后，每轮 LLM 都要读前面所有轮的完整数据，token 可能从 2000 涨到 20000+。
+
+**建议**：
+- 保留最近 N 轮完整历史，更早的对话只保留摘要
+- query_* 工具结果在存入历史时截断为摘要（类似 `_summarize_render_result` 的思路）
+- 或设 token 上限，超过时自动截断早期消息
+
+**涉及文件**：`chat.ts`、`chat_service.py`
+
+---
+
+### 🟢 问题 7：`_user_wants_chart` 函数残留
+
+**现状**：函数还在（line 259-264），但不再被 chat 流程调用。死代码。
+
+**建议**：删除。
+
+**涉及文件**：`chat_service.py` 第 259-264 行
+
+---
+
+### 🟢 问题 8：render 工具白名单硬编码在多处
+
+**现状**：`chat_service.py` 的 line 387-391 和 line 510 各有一份 render 工具名列表，`ai_chat.py` 的 `QUICK_ACTION_TOOLS` 又是一份。新增 render 工具要改三个地方。
+
+**建议**：在 `chart_tools.py` 中定义 `RENDER_TOOL_NAMES = set(...)` 常量，其他地方引用这个常量。
+
+**涉及文件**：`chat_service.py`、`ai_chat.py`、`chart_tools.py`
+
+---
+
+### 优先级排序
+
+| 优先级 | 问题 | 影响 | 改动量 |
+|--------|------|------|--------|
+| **P0** | 问题 2：LLM 第2轮传 tools | 成本+延迟 | 小（删一个参数） |
+| **P0** | 问题 3：SYSTEM_PROMPT 矛盾 | 输出不稳定 | 小（改 prompt） |
+| **P1** | 问题 5：重试逻辑重复 | 维护性 | 中（抽取函数） |
+| **P1** | 问题 8：白名单硬编码 | 维护性 | 小（抽常量） |
+| **P1** | 问题 7：死代码 | 代码整洁 | 小（删几行） |
+| **P2** | 问题 1：解析补丁 | 稳定性 | 大（重构 _parse_response） |
+| **P2** | 问题 6：对话历史无压缩 | 成本 | 中（加截断逻辑） |
+| **P2** | 问题 4：table 不去重 | 偶发重复展示 | 小（扩展去重） |

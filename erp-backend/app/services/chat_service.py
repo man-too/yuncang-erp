@@ -57,9 +57,12 @@ SYSTEM_PROMPT = """你是供应链ERP的AI助手。你的能力是调用工具�
 ## 回复格式（必须返回严格 JSON）
 {"content": "markdown分析文字", "blocks": [...]}
 
-- content 必须写自然语言分析文字，必须有结论和建议。绝不能只放原始 JSON 数据、数组或代码
-- content 只写分析结论，不要再以 markdown 表格重复 blocks 中已有的数据
-- blocks 必须包含工具返回的结构化数据（图表或表格），用于前端渲染
+**content 和 blocks 的职责（严格遵守）：**
+- content：自然语言分析文字，必须有结论和建议。这是用户阅读的主体内容，**绝不能为空**
+- blocks：结构化数据（图表/表格/操作按钮），用于前端渲染组件，**不是放文字的地方**
+- content 不要用 markdown 表格重复 blocks 中已有的数据
+- 如果调了 render_* 工具，blocks 会被系统自动填充，你只需在 content 写分析
+- 如果调了 query_* 工具，你需要把数据放进 blocks 的 table block，content 写分析
 
 ## blocks 规则
 1. 查询类工具（query_*、calc_*、recommend_*、analyze_*）返回的数据 → 必须放在 blocks 的 table block 中展示
@@ -644,14 +647,14 @@ def _parse_response(raw: str | None) -> dict:
 
         # If content is empty or only whitespace after extraction, set default message
         if not content.strip():
-            content = "图表数据已生成，请查看上方图表。"
+            content = "数据已生成，请查看下方图表/表格中的详细数据。"
 
         result["content"] = content
         result["blocks"] = blocks
         return result
 
     if not raw:
-        return _extract_embedded_chart_json({"content": "AI 处理完成，请查看上方图表数据。", "blocks": []})
+        return _extract_embedded_chart_json({"content": "数据已生成，请查看下方图表/表格中的详细数据。", "blocks": []})
     text = raw.strip()
 
     def try_parse(t: str) -> dict | None:
@@ -660,9 +663,14 @@ def _parse_response(raw: str | None) -> dict:
         except json.JSONDecodeError:
             return None
         if isinstance(parsed, dict):
+            content = parsed.get("content", "")
+            blocks = parsed.get("blocks", [])
+            # If no content key at all, fallback to raw text
+            if "content" not in parsed:
+                content = raw
             return {
-                "content": parsed.get("content", raw),
-                "blocks": parsed.get("blocks", []),
+                "content": content,
+                "blocks": blocks,
             }
         # Bug 1.1: JSON array - convert to table block
         if isinstance(parsed, list):
