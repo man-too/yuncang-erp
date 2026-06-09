@@ -10,8 +10,24 @@
       <el-button type="primary" size="small" @click="loadHeatmap">分析</el-button>
     </div>
 
-    <div v-loading="loading" style="height: 360px; margin-bottom: 12px;">
-      <v-chart v-if="!loading && heatmapData.length > 0" :option="chartOption" autoresize style="height: 100%;" />
+    <div v-loading="loading" style="max-height: 400px; overflow-y: auto; margin-bottom: 12px;">
+      <el-table v-if="!loading && heatmapData.length > 0" :data="sortedData" stripe size="small" show-summary :summary-method="getSummary">
+        <el-table-column prop="product_name" label="产品名" min-width="120" />
+        <el-table-column prop="warehouse_name" label="仓库名" min-width="100" />
+        <el-table-column prop="quantity" label="库存量" align="right" width="90" />
+        <el-table-column label="状态" width="80" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.alert_level >= 0.6 ? 'danger' : row.alert_level >= 0.3 ? 'warning' : 'success'" size="small">
+              {{ row.alert_level >= 0.6 ? '严重' : row.alert_level >= 0.3 ? '预警' : '正常' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="建议" min-width="160">
+          <template #default="{ row }">
+            {{ row.suggestion || '—' }}
+          </template>
+        </el-table-column>
+      </el-table>
       <el-empty v-else-if="!loading" description="暂无数据" />
     </div>
 
@@ -29,14 +45,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import VChart from 'vue-echarts'
-import { use } from 'echarts/core'
-import { CanvasRenderer } from 'echarts/renderers'
-import { HeatmapChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent, VisualMapComponent, LegendComponent } from 'echarts/components'
 import { inventoryApi, productApi, aiApi } from '@/api'
-
-use([CanvasRenderer, HeatmapChart, GridComponent, TooltipComponent, VisualMapComponent, LegendComponent])
 
 const warehouses = ref<any[]>([])
 const products = ref<any[]>([])
@@ -46,44 +55,21 @@ const aiResult = ref<any>(null)
 const filterWarehouseId = ref(null)
 const filterProductId = ref(null)
 
-const warehouseNames = computed(() => {
-  const names = [...new Set(heatmapData.value.map(d => d.warehouse_name))].filter(Boolean)
-  return names.length ? names : ['默认仓库']
+const sortedData = computed(() => {
+  return [...heatmapData.value].sort((a, b) => (b.alert_level ?? 0) - (a.alert_level ?? 0))
 })
 
-const productNames = computed(() => {
-  const names = [...new Set(heatmapData.value.map(d => d.product_name))].filter(Boolean)
-  return names.length ? names : ['默认产品']
-})
-
-const chartOption = computed(() => {
-  const whNames = warehouseNames.value
-  const prodNames = productNames.value
-  const whIdx = Object.fromEntries(whNames.map((n, i) => [n, i]))
-  const prodIdx = Object.fromEntries(prodNames.map((n, i) => [n, i]))
-  const data = heatmapData.value.map(d => [
-    whIdx[d.warehouse_name] ?? 0,
-    prodIdx[d.product_name] ?? 0,
-    d.alert_level ?? 0,
-  ])
-  return {
-    tooltip: { position: 'top', formatter: (p: any) => {
-      const item = heatmapData.value.find(d => d.warehouse_name === whNames[p.data[0]] && d.product_name === prodNames[p.data[1]])
-      if (!item) return ''
-      const status = item.alert_level >= 0.6 ? '告警' : item.alert_level >= 0.3 ? '偏高/偏低' : '正常'
-      return `<b>${item.product_name}</b><br/>仓库: ${item.warehouse_name}<br/>库存: ${item.quantity} / 阈值: ${item.min_stock}-${item.max_stock}<br/>状态: ${status}`
-    }},
-    grid: { left: 160, right: 60, top: 20, bottom: 50 },
-    xAxis: { type: 'category', data: whNames, splitArea: { show: true } },
-    yAxis: { type: 'category', data: prodNames, splitArea: { show: true } },
-    visualMap: {
-      min: 0, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 0,
-      inRange: { color: ['#e8f5e9', '#fff9c4', '#ffcc80', '#ef5350'] },
-    },
-    series: [{ name: '库存状态', type: 'heatmap', data, label: { show: data.length < 50 },
-      emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.5)' } } }],
-  }
-})
+const getSummary = ({ columns }: { columns: any[] }) => {
+  const sums: string[] = []
+  columns.forEach((col: any, index: number) => {
+    if (index === 0) {
+      sums.push(`共 ${heatmapData.value.length} 项`)
+    } else {
+      sums.push('')
+    }
+  })
+  return sums
+}
 
 const loadHeatmap = async () => {
   loading.value = true

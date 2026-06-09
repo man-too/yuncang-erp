@@ -56,7 +56,7 @@ SYSTEM_PROMPT = """你是供应链ERP的AI助手。你的能力是调用工具�
 
 ## 回复格式（必须返回严格 JSON）
 {"content": "markdown文字", "blocks": []}
-- content 放文字分析，不要嵌入 JSON 或代码
+- content 必须包含自然语言分析和建议，绝不能只放原始 JSON 数据、数组或代码。即使工具返回了数据，也要用文字总结关键发现
 - blocks 可选，只在用户明确要看图表时才放内容
 
 blocks 中每个元素为以下三种之一：
@@ -368,8 +368,10 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                 resp2 = client.chat.completions.create(
                     model=settings.OPENAI_MODEL,
                     messages=full_messages,
-                    temperature=0.3,
+                    temperature=0.5,
                     max_tokens=4096,
+                    tools=ALL_TOOLS,
+                    tool_choice="auto",
                     response_format={"type": "json_object"},
                     extra_body={"thinking": {"type": "disabled"}},
                 )
@@ -378,8 +380,10 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                     resp2 = client.chat.completions.create(
                         model=settings.OPENAI_MODEL,
                         messages=full_messages,
-                        temperature=0.3,
+                        temperature=0.5,
                         max_tokens=4096,
+                        tools=ALL_TOOLS,
+                        tool_choice="auto",
                         extra_body={"thinking": {"type": "disabled"}},
                     )
                 else:
@@ -472,8 +476,10 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                 resp2 = client.chat.completions.create(
                     model=settings.OPENAI_MODEL,
                     messages=full_messages,
-                    temperature=0.3,
+                    temperature=0.5,
                     max_tokens=4096,
+                    tools=ALL_TOOLS,
+                    tool_choice="auto",
                     response_format={"type": "json_object"},
                     extra_body={"thinking": {"type": "disabled"}},
                 )
@@ -605,9 +611,12 @@ def _parse_response(raw: str | None) -> dict:
                 "content": parsed.get("content", raw),
                 "blocks": parsed.get("blocks", []),
             }
-        # Bug 1.1: JSON array or other non-dict - convert to readable string
+        # Bug 1.1: JSON array - convert to table block
         if isinstance(parsed, list):
-            return {"content": json.dumps(parsed, ensure_ascii=False), "blocks": []}
+            cols = []
+            if parsed and isinstance(parsed[0], dict):
+                cols = [{"key": k, "title": k} for k in parsed[0].keys()]
+            return {"content": f"查询到 {len(parsed)} 条数据，详情如下。", "blocks": [{"type": "table", "columns": cols, "rows": parsed}]}
         if isinstance(parsed, (str, int, float, bool)) or parsed is None:
             return {"content": str(parsed), "blocks": []}
         # Fallback for any other type

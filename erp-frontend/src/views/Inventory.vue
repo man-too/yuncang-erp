@@ -126,6 +126,7 @@
         <el-form-item label="编码" required><el-input v-model="whForm.code" /></el-form-item>
         <el-form-item label="名称" required><el-input v-model="whForm.name" /></el-form-item>
         <el-form-item label="地址"><el-input v-model="whForm.address" /></el-form-item>
+        <el-form-item label="城市"><el-input v-model="whForm.city" /></el-form-item>
         <el-form-item label="负责人"><el-input v-model="whForm.manager" /></el-form-item>
       </el-form>
       <template #footer>
@@ -170,7 +171,7 @@ const warehouses = ref<any[]>([])
 const categories = ref<any[]>([])
 const filters = reactive({ keyword: '', warehouse_id: null, stock_status: '', category_id: null, qty_min: null, qty_max: null })
 
-const whForm = reactive({ code: '', name: '', address: '', manager: '' })
+const whForm = reactive({ code: '', name: '', address: '', city: '', manager: '' })
 const adjustForm = reactive({ product_id: 0, warehouse_id: 1, current_qty: 0, new_quantity: 0, remark: '' })
 
 const handleSizeChange = (val: number) => {
@@ -262,7 +263,7 @@ const fetchAlerts = async () => {
 }
 
 const openWarehouseDialog = () => {
-  whForm.code = ''; whForm.name = ''; whForm.address = ''; whForm.manager = ''
+  whForm.code = ''; whForm.name = ''; whForm.address = ''; whForm.city = ''; whForm.manager = ''
   whDialogVisible.value = true
 }
 

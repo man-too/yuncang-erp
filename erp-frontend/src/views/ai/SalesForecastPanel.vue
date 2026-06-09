@@ -65,6 +65,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart, BarChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, TitleComponent } from 'echarts/components'
 import { TrendCharts, DataAnalysis, ArrowLeft } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { productApi, aiApi } from '@/api'
 
 use([CanvasRenderer, LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, TitleComponent])
@@ -260,8 +261,8 @@ const loadAggregateData = async () => {
       topProducts.value = []
     }
   } catch {
-    aggregateData.value = []
-    topProducts.value = []
+    // Keep existing data on API failure instead of clearing
+    ElMessage.warning('销售数据加载失败，显示上次缓存数据')
   } finally {
     loading.value = false
   }

@@ -24,8 +24,8 @@ if not db.query(User).filter(User.username == 'admin').first():
     print('管理员账号创建: admin / admin123')
 
 # 2. 仓库
-wh1 = Warehouse(name='主仓库', code='WH-001', address='公司总部一楼', manager='张三')
-wh2 = Warehouse(name='备用仓库', code='WH-002', address='工业园区B区3号', manager='李四')
+wh1 = Warehouse(name='主仓库', code='WH-001', address='公司总部一楼', city='上海', manager='张三')
+wh2 = Warehouse(name='备用仓库', code='WH-002', address='工业园区B区3号', city='苏州', manager='李四')
 db.add_all([wh1, wh2]); db.flush()
 
 # 3. 产品分类

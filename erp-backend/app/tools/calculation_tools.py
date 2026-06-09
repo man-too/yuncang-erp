@@ -17,20 +17,20 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "calc_reorder_point",
-            "description": "计算产品的再订货点(ROP)，包含安全库存、日均销量、交期天数。基于近60天销量数据和供应商交期，按ABC分类确定服务水平。当用户询问补货时机、再订货点、安全库存时应首先调用此工具",
+            "description": "计算产品的再订货点(ROP)，包含安全库存、日均销量、交期天数。基于近60天销量数据和供应商交期，按ABC分类确定服务水平。当用户询问补货时机、再订货点、安全库存时应首先调用此工具。不指定product_id时计算所有产品的ROP",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "product_id": {
                         "type": "integer",
-                        "description": "产品ID",
+                        "description": "产品ID（可选，不指定则计算所有产品）",
                     },
                     "supplier_id": {
                         "type": "integer",
                         "description": "供应商ID（可选，默认取最近采购的供应商）",
                     },
                 },
-                "required": ["product_id"],
+                "required": [],
             },
         },
     },
@@ -71,9 +71,19 @@ def execute(name: str, args: dict, db: Session) -> dict | None:
     if name == "calc_reorder_point":
         product_id = args.get("product_id")
         supplier_id = args.get("supplier_id")
-        if not product_id:
-            return {"error": "product_id 必填"}
-        return calc_reorder_point(product_id, db, supplier_id)
+        if product_id:
+            return calc_reorder_point(product_id, db, supplier_id)
+        # No product_id specified — calculate ROP for all products
+        from app.models.product import Product
+        products = db.query(Product).filter(Product.is_active == True).all()
+        results = []
+        for p in products:
+            try:
+                r = calc_reorder_point(p.id, db, supplier_id)
+                results.append(r)
+            except Exception:
+                pass
+        return {"total": len(results), "products": results}
 
     if name == "calc_supplier_score":
         supplier_id = args.get("supplier_id")

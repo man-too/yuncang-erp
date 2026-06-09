@@ -1,11 +1,13 @@
 """图表渲染工具 — 查询数据 + 直接返回完整 ECharts option"""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+import statistics
+
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.models.inventory import Inventory, Warehouse, InventoryAlert
-from app.models.product import Product
+from app.models.product import Product, ProductCategory
 from app.models.supplier import Supplier, SupplierEvaluation
 from app.models.purchase import PurchaseOrder
 from app.models.sale import SaleOrder, SaleOrderItem
@@ -16,7 +18,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "render_inventory_heatmap",
-            "description": "生成库存热力图(ECharts)，用颜色深浅表示缺货严重程度。仅在用户明确要求看库存图、热力图时调用。如果用户只是问库存数量或低库存产品，应使用 query_inventory",
+            "description": "生成库存热力图(ECharts)，用颜色深浅表示缺货严重程度。仅在用户明确要求看库存图、热力图时调用。如果用户只是问库存数量或低库存产品，应使用 query_inventory。如果用户问安全库存、再订货点、补货时机，应使用 calc_reorder_point",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -1113,11 +1115,8 @@ def _audit_purchase_plan(args: dict, db: Session) -> dict:
     # ── 3. 天气（取第一个仓库所在城市）──
     weather_result = None
     warehouse = db.query(Warehouse).first()
-    if warehouse and warehouse.address:
-        import re
-        city_match = re.search(r"([一-鿿]{2,4}[市省区])", warehouse.address)
-        city = city_match.group(1).rstrip("市省区") if city_match else "上海"
-        weather_result = weather_exec("query_weather", {"city": city, "days": 7}, db)
+    if warehouse and warehouse.city:
+        weather_result = weather_exec("query_weather", {"city": warehouse.city, "days": 7}, db)
 
     # ── 4. 产品 ROP / 销量预测 ──
     product_risks = []
@@ -1228,6 +1227,65 @@ def _audit_purchase_plan(args: dict, db: Session) -> dict:
                 "mitigability": "低",
                 "score": 1 * 3 * 3,
                 "suggestion": "关注物流时效，提前备货或选择备用运输路线",
+            })
+
+    # 销量波动风险
+    for it in items:
+        pid = it.get("product_id")
+        if not pid:
+            continue
+        product = db.query(Product).filter(Product.id == pid).first()
+        if not product:
+            continue
+        thirty_days_ago = datetime.now() - timedelta(days=30)
+        daily_sales = (
+            db.query(
+                func.date(SaleOrder.order_date).label("date"),
+                func.sum(SaleOrderItem.quantity).label("total_qty"),
+            )
+            .join(SaleOrder, SaleOrderItem.order_id == SaleOrder.id)
+            .filter(SaleOrderItem.product_id == pid)
+            .filter(SaleOrder.order_date >= thirty_days_ago)
+            .group_by(func.date(SaleOrder.order_date))
+            .all()
+        )
+        if not daily_sales:
+            continue
+        quantities = [float(row.total_qty or 0) for row in daily_sales]
+        mean_qty = statistics.mean(quantities)
+        if mean_qty == 0:
+            continue
+        std_qty = statistics.stdev(quantities) if len(quantities) >= 2 else 0
+        cv = std_qty / mean_qty
+        if cv > 0.5:
+            risk_matrix.append({
+                "category": "需求风险",
+                "item": f"{product.name} 销量波动",
+                "probability": "中" if cv < 0.8 else "高",
+                "impact": "中",
+                "mitigability": "中",
+                "score": round(cv * 50, 1),
+                "suggestion": f"近30天销量变异系数{cv:.2f}，波动较大，建议增加安全库存缓冲",
+            })
+
+    # 牛鞭效应风险
+    for it in items:
+        pid = it.get("product_id")
+        if not pid:
+            continue
+        product = db.query(Product).filter(Product.id == pid).first()
+        if not product or not product.category_id:
+            continue
+        category = db.query(ProductCategory).filter(ProductCategory.id == product.category_id).first()
+        if category and category.bullwhip_threshold and category.bullwhip_threshold > 1.5:
+            risk_matrix.append({
+                "category": "供应链风险",
+                "item": f"{product.name} 牛鞭效应",
+                "probability": "中",
+                "impact": "高",
+                "mitigability": "低",
+                "score": round(category.bullwhip_threshold * 30, 1),
+                "suggestion": f"产品类别{category.name}的牛鞭效应阈值{category.bullwhip_threshold}较高，建议缩短交期、减少批量、增加信息共享",
             })
 
     # ── 6. 综合风险等级 ──

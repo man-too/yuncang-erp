@@ -11,6 +11,31 @@
       </div>
     </div>
 
+    <!-- KPI Metric Cards -->
+    <div v-if="kpiData" class="kpi-row">
+      <el-card class="kpi-card" shadow="hover">
+        <div class="kpi-icon"><el-icon :size="22"><Clock /></el-icon></div>
+        <div class="kpi-content">
+          <div class="kpi-label">周转天数</div>
+          <div class="kpi-value">{{ kpiData.turnover_days ?? '—' }}<span class="kpi-unit">天</span></div>
+        </div>
+      </el-card>
+      <el-card class="kpi-card" shadow="hover">
+        <div class="kpi-icon kpi-icon--warning"><el-icon :size="22"><Box /></el-icon></div>
+        <div class="kpi-content">
+          <div class="kpi-label">呆滞品数</div>
+          <div class="kpi-value">{{ kpiData.dead_stock_count ?? '—' }}<span class="kpi-unit">项</span></div>
+        </div>
+      </el-card>
+      <el-card class="kpi-card" shadow="hover">
+        <div class="kpi-icon kpi-icon--danger"><el-icon :size="22"><Money /></el-icon></div>
+        <div class="kpi-content">
+          <div class="kpi-label">资金占用</div>
+          <div class="kpi-value">{{ formatCurrency(kpiData.capital_occupied) }}<span class="kpi-unit">元</span></div>
+        </div>
+      </el-card>
+    </div>
+
     <!-- Risk Matrix Table -->
     <div v-if="riskMatrix.length > 0" class="matrix-section">
       <div class="section-row">
@@ -57,9 +82,36 @@
       </el-table>
     </div>
 
+    <!-- Product Risk Details -->
+    <div v-if="productRisks.length > 0" class="product-risk-section">
+      <h4 class="section-title">产品风险详情</h4>
+      <el-table
+        :data="productRisks"
+        stripe
+        size="small"
+        border
+        max-height="320"
+      >
+        <el-table-column prop="product_name" label="产品名" min-width="140" show-overflow-tooltip />
+        <el-table-column prop="stock_risk" label="库存风险" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag :type="riskTagType(row.stock_risk)" size="small">{{ row.stock_risk }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="supplier_risk" label="供应商风险" width="110" align="center">
+          <template #default="{ row }">
+            <el-tag :type="riskTagType(row.supplier_risk)" size="small">{{ row.supplier_risk }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="current_qty" label="当前库存" width="100" align="right" />
+        <el-table-column prop="rop" label="再订货点" width="100" align="right" />
+        <el-table-column prop="supplier_name" label="供应商" min-width="120" show-overflow-tooltip />
+      </el-table>
+    </div>
+
     <!-- Empty state when no audit result yet -->
     <el-empty
-      v-else-if="!loading"
+      v-if="riskMatrix.length === 0 && productRisks.length === 0 && !loading && !kpiData"
       description="暂无风险审核数据，点击下方按钮开始审核"
       :image-size="80"
     />
@@ -97,7 +149,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Cloudy } from '@element-plus/icons-vue'
+import { Cloudy, Clock, Box, Money } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { usePurchaseDecisionStore } from '@/stores/purchaseDecision'
 import { aiApi } from '@/api'
@@ -131,6 +183,18 @@ const weatherText = computed(() => {
   const res = auditResult.value
   if (res && res.weather_summary) return res.weather_summary
   return weatherData.value || null
+})
+
+const kpiData = computed(() => {
+  const res = auditResult.value
+  if (!res || !res.kpi) return null
+  return res.kpi
+})
+
+const productRisks = computed(() => {
+  const res = auditResult.value
+  if (!res || !Array.isArray(res.product_risks)) return []
+  return res.product_risks
 })
 
 // ----- Weather data (fallback if not in auditResult) -----
@@ -185,6 +249,7 @@ const categoryColors: Record<string, string> = {
   '需求风险': 'danger',
   '库存风险': '',
   '外部风险': 'info',
+  '供应链风险': 'warning',
 }
 
 function categoryTagType(category: string): string {
@@ -198,6 +263,20 @@ function levelTagType(level: string, invert = false): string {
     ? { '高': 'success', '中': 'warning', '低': 'danger' } as const
     : { '高': 'danger', '中': 'warning', '低': 'success' } as const
   return map[level as keyof typeof map] || 'info'
+}
+
+function riskTagType(level: string): string {
+  const map: Record<string, string> = {
+    'high': 'danger',
+    'medium': 'warning',
+    'low': 'success',
+  }
+  return map[level] || 'info'
+}
+
+function formatCurrency(value: number | undefined | null): string {
+  if (value == null) return '—'
+  return '¥' + value.toLocaleString()
 }
 
 function scoreClass(score: number): string {
@@ -284,6 +363,75 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* ----- KPI Cards ----- */
+.kpi-row {
+  display: flex;
+  gap: 16px;
+}
+.kpi-card {
+  flex: 1;
+  border-radius: 10px;
+}
+.kpi-card :deep(.el-card__body) {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+}
+.kpi-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: #ecf5ff;
+  color: #409eff;
+}
+.kpi-icon--warning {
+  background: #fdf6ec;
+  color: #e6a23c;
+}
+.kpi-icon--danger {
+  background: #fef0f0;
+  color: #f56c6c;
+}
+.kpi-content {
+  flex: 1;
+  min-width: 0;
+}
+.kpi-label {
+  font-size: 13px;
+  color: #909399;
+  margin-bottom: 4px;
+}
+.kpi-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+.kpi-unit {
+  font-size: 13px;
+  font-weight: 400;
+  color: #909399;
+  margin-left: 4px;
+}
+
+/* ----- Product Risk Section ----- */
+.product-risk-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.product-risk-section .section-title {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text-primary);
+  margin: 0;
 }
 .section-row {
   display: flex;

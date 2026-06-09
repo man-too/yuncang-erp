@@ -10,9 +10,9 @@ USE erp_db;
 INSERT INTO `users` (`username`, `email`, `hashed_password`, `display_name`, `role`, `is_active`)
 VALUES ('admin', 'admin@erp.com', '$2b$12$LJ3m4ys3LgX3Yx5Z6p7Q8O9a0b1c2d3e4f5g6h7i8j9k0l1m2n3o4p5q', '系统管理员', 'admin', 1);
 
-INSERT INTO `warehouses` (`name`, `code`, `address`, `manager`)
-VALUES ('主仓库', 'WH-001', '公司总部一楼', '张三'),
-       ('备用仓库', 'WH-002', '工业园区B区3号', '李四');
+INSERT INTO `warehouses` (`name`, `code`, `address`, `city`, `manager`)
+VALUES ('主仓库', 'WH-001', '公司总部一楼', '上海', '张三'),
+       ('备用仓库', 'WH-002', '工业园区B区3号', '苏州', '李四');
 
 INSERT INTO `product_categories` (`name`, `sort_order`)
 VALUES ('原材料', 1), ('半成品', 2), ('成品', 3), ('包装材料', 4);

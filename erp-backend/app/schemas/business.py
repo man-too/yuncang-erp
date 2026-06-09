@@ -210,6 +210,7 @@ class WarehouseCreate(BaseModel):
     name: str
     code: str
     address: str = ""
+    city: str = ""
     manager: str = ""
     remark: str = ""
 

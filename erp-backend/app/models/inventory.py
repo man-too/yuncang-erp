@@ -18,6 +18,7 @@ class Warehouse(Base):
     name: Mapped[str] = mapped_column(String(100))
     code: Mapped[str] = mapped_column(String(50), unique=True)
     address: Mapped[str] = mapped_column(String(500), default="")
+    city: Mapped[str] = mapped_column(String(50), default="")
     manager: Mapped[str] = mapped_column(String(100), default="")
     is_active: Mapped[bool] = mapped_column(default=True)
     remark: Mapped[str] = mapped_column(Text, default="")
