@@ -283,7 +283,7 @@ function hasValidChartData(block: MessageBlock): boolean {
 <style scoped>
 .chat-message { display: flex; gap: 10px; }
 .chat-message.user { align-self: flex-end; flex-direction: row-reverse; max-width: 75%; }
-.chat-message.assistant { align-self: flex-start; max-width: 95%; min-width: 320px; }
+.chat-message.assistant { align-self: flex-start; min-width: 320px; }
 
 .msg-avatar {
   width: 36px; height: 36px; border-radius: 50%; display: flex;
@@ -296,9 +296,10 @@ function hasValidChartData(block: MessageBlock): boolean {
 .msg-body { flex: 1; min-width: 0; }
 .msg-bubble {
   padding: 12px 16px; border-radius: 12px; font-size: 14px; line-height: 1.7;
+  max-width: 100%; overflow-wrap: break-word; word-break: break-word;
 }
 .chat-message.user .msg-bubble { background: var(--color-info-bg); border: 1px solid var(--color-info-light); }
-.chat-message.assistant .msg-bubble { background: var(--bg-page); border: 1px solid var(--border-color); }
+.chat-message.assistant .msg-bubble { background: var(--bg-page); border: 1px solid var(--border-color); overflow: hidden; }
 
 .msg-content h3 { margin: 14px 0 8px; font-size: 16px; }
 .msg-content h4 { margin: 12px 0 6px; font-size: 15px; }
@@ -312,13 +313,14 @@ function hasValidChartData(block: MessageBlock): boolean {
 }
 .msg-content pre {
   background: rgba(0, 0, 0, 0.06); padding: 12px; border-radius: 8px;
-  overflow-x: auto; margin: 8px 0;
+  overflow-x: auto; margin: 8px 0; max-width: 100%;
 }
 .msg-content pre code {
   background: none; padding: 0; font-size: 13px; line-height: 1.5;
 }
 .msg-content table {
   border-collapse: collapse; margin: 8px 0; width: 100%; font-size: 13px;
+  table-layout: fixed; overflow-wrap: break-word; word-break: break-word;
 }
 .msg-content table th, .msg-content table td {
   border: 1px solid var(--border-color); padding: 6px 10px; text-align: left;
@@ -337,17 +339,23 @@ function hasValidChartData(block: MessageBlock): boolean {
   border-radius: 8px;
   padding: 8px;
   overflow: hidden;
+  min-height: 280px;
 }
 .chart-render {
   width: 100% !important;
   height: 320px;
   min-height: 280px;
+  min-width: 300px;
 }
 .block-table {
   margin: 12px 0;
   border-radius: 8px;
   overflow: hidden;
   box-shadow: var(--shadow-sm);
+  max-width: 100%;
+}
+.block-table :deep(.el-table__body-wrapper) {
+  overflow-x: auto;
 }
 .block-table :deep(th) {
   background: var(--table-header-bg) !important;
