@@ -158,7 +158,9 @@ export const useChatStore = defineStore('chat', () => {
 
     try {
       // Step 1: Always fetch direct chart blocks from backend (100% deterministic)
-      const directBlocks: MessageBlock[] = await fetchQuickActionBlocks(type)
+      const quickResult = await fetchQuickActionBlocks(type)
+      const directBlocks: MessageBlock[] = quickResult.blocks
+      const fallbackContent: string = quickResult.content || ''
 
       // Step 2: Ask LLM for text analysis only (charts already displayed)
       let llmContent = ''
@@ -185,16 +187,18 @@ export const useChatStore = defineStore('chat', () => {
         llmBlocks = (res.blocks || []).map((b: any) => normalizeBlock(b))
       } catch {
         if (directBlocks.length > 0) {
-          llmContent = 'AI 文字分析暂时不可用，图表数据正常显示。'
+          llmContent = ''
         } else {
           llmContent = '抱歉，请求失败，请稍后重试。'
         }
       }
 
       // Step 3: Merge — directBlocks first (charts), llmBlocks has action buttons etc.
+      // Use LLM content if available, otherwise fallback to backend-generated analysis
+      const finalContent = llmContent || fallbackContent || '数据已加载，请查看上方图表。'
       addMessage({
         role: 'assistant',
-        content: llmContent,
+        content: finalContent,
         blocks: [...directBlocks, ...llmBlocks],
       })
     } catch {
@@ -204,16 +208,17 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function fetchQuickActionBlocks(type: string): Promise<MessageBlock[]> {
+  async function fetchQuickActionBlocks(type: string): Promise<{ content: string; blocks: MessageBlock[] }> {
     try {
       // Use backend quick-chart API for all types — reliable, no LLM dependency
       const res: any = await aiApi.quickChart(type)
-      if (res?.blocks && Array.isArray(res.blocks) && res.blocks.length > 0) {
-        return res.blocks.map((b: any) => normalizeBlock(b))
-      }
-      return []
+      const content = res?.content || ''
+      const blocks = (res?.blocks && Array.isArray(res.blocks) && res.blocks.length > 0)
+        ? res.blocks.map((b: any) => normalizeBlock(b))
+        : []
+      return { content, blocks }
     } catch {
-      return []
+      return { content: '', blocks: [] }
     }
   }
 

@@ -283,7 +283,7 @@ function hasValidChartData(block: MessageBlock): boolean {
 <style scoped>
 .chat-message { display: flex; gap: 10px; }
 .chat-message.user { align-self: flex-end; flex-direction: row-reverse; max-width: 75%; }
-.chat-message.assistant { align-self: flex-start; min-width: 320px; max-width: 680px; }
+.chat-message.assistant { align-self: flex-start; min-width: 320px; max-width: 70%; }
 
 .msg-avatar {
   width: 36px; height: 36px; border-radius: 50%; display: flex;
@@ -339,14 +339,14 @@ function hasValidChartData(block: MessageBlock): boolean {
   border-radius: 8px;
   padding: 8px;
   overflow: hidden;
-  min-height: 280px;
-  min-width: 400px;
+  min-height: 320px;
+  min-width: 480px;
 }
 .chart-render {
   width: 100% !important;
-  height: 320px;
-  min-height: 280px;
-  min-width: 300px;
+  height: 400px;
+  min-height: 320px;
+  min-width: 480px;
 }
 .block-table {
   margin: 12px 0;

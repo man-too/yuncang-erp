@@ -39,7 +39,7 @@ def ai_quick_chart(
 
     result = execute_tool(tool_name, {}, db)
     if not result or "error" in result:
-        return {"blocks": []}
+        return {"content": "数据查询失败，请稍后重试。", "blocks": []}
 
     # render_* tools return either {"_render": True, "blocks": [...]} or a single block with _render
     blocks = []
@@ -54,7 +54,158 @@ def ai_quick_chart(
         elif result.get("type") in ("chart", "table"):
             blocks = [result]
 
-    return {"blocks": blocks}
+    # Generate analysis text based on quick action type and data
+    content = _generate_quick_analysis(type, blocks)
+
+    return {"content": content, "blocks": blocks}
+
+
+# 快捷操作默认分析文字模板
+_QUICK_ACTION_TITLES = {
+    "stock_alert": "库存预警分析",
+    "sales_forecast": "销售趋势分析",
+    "supplier_ranking": "供应商排名分析",
+    "dashboard": "供应链综合诊断",
+    "purchase_advice": "采购建议分析",
+    "safety_stock": "安全库存分析",
+    "transfer_advice": "仓库调拨建议",
+}
+
+
+def _generate_quick_analysis(action_type: str, blocks: list) -> str:
+    """根据快捷操作类型和数据生成分析文字"""
+    title = _QUICK_ACTION_TITLES.get(action_type, "数据分析")
+
+    # Extract key data from blocks for analysis
+    table_rows = []
+    for b in blocks:
+        if b.get("type") == "table":
+            table_rows = b.get("rows", [])
+            break
+
+    if action_type == "stock_alert":
+        # Try to extract stats from chart data (heatmap values are ratios)
+        chart_data_points = []
+        for b in blocks:
+            if b.get("type") == "chart":
+                for s in b.get("data", {}).get("series", []):
+                    chart_data_points.extend(s.get("data", []))
+        if chart_data_points:
+            # Heatmap values: ratio = current_qty / min_stock
+            critical = sum(1 for p in chart_data_points if isinstance(p, (list, tuple)) and len(p) >= 3 and p[2] < 0.5)
+            warning = sum(1 for p in chart_data_points if isinstance(p, (list, tuple)) and len(p) >= 3 and 0.5 <= p[2] <= 1.0)
+            normal = sum(1 for p in chart_data_points if isinstance(p, (list, tuple)) and len(p) >= 3 and p[2] > 1.0)
+            total = len(chart_data_points)
+            parts = [f"## {title}\n"]
+            parts.append(f"当前共监控 **{total}** 个仓库×产品库存项：")
+            if critical > 0:
+                parts.append(f"- 🔴 **严重不足/缺货**：{critical} 项（库存低于安全线的50%），需立即补货")
+            if warning > 0:
+                parts.append(f"- 🟡 **库存偏低**：{warning} 项（库存低于安全线），建议安排补货")
+            if normal > 0:
+                parts.append(f"- 🟢 **库存正常**：{normal} 项")
+            parts.append("\n请查看上方热力图了解各仓库×产品的库存分布详情，红色区域需重点关注。")
+            return "\n".join(parts)
+        if not table_rows:
+            return f"## {title}\n\n当前库存状态良好，暂无预警项目。"
+        critical = sum(1 for r in table_rows if "缺货" in str(r.get("status", "")) or "严重" in str(r.get("status", "")))
+        warning = sum(1 for r in table_rows if "偏低" in str(r.get("status", "")))
+        normal = sum(1 for r in table_rows if "正常" in str(r.get("status", "")))
+        parts = [f"## {title}\n"]
+        parts.append(f"当前共监控 **{len(table_rows)}** 个库存项：")
+        if critical > 0:
+            parts.append(f"- 🔴 **严重不足/缺货**：{critical} 项，需立即补货")
+        if warning > 0:
+            parts.append(f"- 🟡 **库存偏低**：{warning} 项，建议安排补货")
+        if normal > 0:
+            parts.append(f"- 🟢 **库存正常**：{normal} 项")
+        parts.append("\n请查看上方热力图了解各仓库×产品的库存分布详情，红色区域需重点关注。")
+        return "\n".join(parts)
+
+    elif action_type == "safety_stock":
+        if not table_rows:
+            return f"## {title}\n\n暂无产品数据。"
+        urgent = sum(1 for r in table_rows if "紧急" in str(r.get("status", "")))
+        suggest = sum(1 for r in table_rows if "建议" in str(r.get("status", "")))
+        safe = sum(1 for r in table_rows if "安全" in str(r.get("status", "")))
+        parts = [f"## {title}\n"]
+        parts.append(f"共分析 **{len(table_rows)}** 个产品的安全库存和再订货点(ROP)：")
+        if urgent > 0:
+            parts.append(f"- 🔴 **紧急补货**：{urgent} 项（库存低于安全库存线）")
+        if suggest > 0:
+            parts.append(f"- 🟡 **建议补货**：{suggest} 项（库存低于再订货点）")
+        if safe > 0:
+            parts.append(f"- 🟢 **库存安全**：{safe} 项")
+        parts.append("\n建议优先处理紧急补货项目，避免断货风险。")
+        return "\n".join(parts)
+
+    elif action_type == "transfer_advice":
+        if not table_rows or any("暂无" in str(r.get("msg", "")) or "均衡" in str(r.get("msg", "")) for r in table_rows):
+            return f"## {title}\n\n当前各仓库库存分布均衡，暂无调拨需求。"
+        parts = [f"## {title}\n"]
+        parts.append(f"检测到 **{len(table_rows)}** 项调拨建议，可从富余仓库向短缺仓库调拨以平衡库存：")
+        for r in table_rows[:5]:
+            parts.append(f"- {r.get('product_name', '')}：从{r.get('from_warehouse', '')}调拨{r.get('transfer_qty', 0)}件到{r.get('to_warehouse', '')}")
+        if len(table_rows) > 5:
+            parts.append(f"\n...还有 {len(table_rows) - 5} 项调拨建议，详见上方表格。")
+        return "\n".join(parts)
+
+    elif action_type == "sales_forecast":
+        return f"## {title}\n\n上方图表展示了近6个月的实际销量及AI预测趋势。请关注：\n- 上升趋势的产品可适当增加库存\n- 下降趋势的产品需控制采购量，避免积压\n- 预测数据基于历史销量，仅供参考"
+
+    elif action_type == "supplier_ranking":
+        # Try to extract ranking data from chart series
+        supplier_names = []
+        for b in blocks:
+            if b.get("type") == "chart":
+                # Radar chart: indicator has names; Bar chart: xAxis has names
+                data = b.get("data", {})
+                # Try xAxis categories (bar chart)
+                x_data = data.get("xAxis", {})
+                if isinstance(x_data, dict):
+                    categories = x_data.get("data", [])
+                    supplier_names = [c for c in categories if isinstance(c, str) and c]
+                elif isinstance(x_data, list):
+                    supplier_names = [c for c in x_data if isinstance(c, str) and c]
+                # Try indicator (radar chart)
+                if not supplier_names:
+                    indicators = data.get("radar", {}).get("indicator", []) if isinstance(data.get("radar"), dict) else []
+                    supplier_names = [ind.get("name", "") for ind in indicators if isinstance(ind, dict) and ind.get("name")]
+        if supplier_names:
+            parts = [f"## {title}\n"]
+            parts.append(f"共评估 **{len(supplier_names)}** 家活跃供应商：")
+            for i, name in enumerate(supplier_names[:5], 1):
+                parts.append(f"{i}. **{name}**")
+            if len(supplier_names) > 5:
+                parts.append(f"\n...共 {len(supplier_names)} 家，详见上方排名图表。")
+            parts.append("\n建议优先与综合评分高的供应商合作，同时关注交付率和质量评分。")
+            return "\n".join(parts)
+        if not table_rows:
+            return f"## {title}\n\n暂无供应商评分数据。"
+        parts = [f"## {title}\n"]
+        for i, r in enumerate(table_rows[:5], 1):
+            name = r.get("supplier_name", "")
+            score = r.get("total_score", 0)
+            parts.append(f"{i}. **{name}** — 综合评分 {score}")
+        parts.append("\n建议优先与综合评分高的供应商合作，同时关注交付率和质量评分。")
+        return "\n".join(parts)
+
+    elif action_type == "purchase_advice":
+        if not table_rows or any("暂无" in str(r.get("msg", "")) for r in table_rows):
+            return f"## {title}\n\n当前库存充足，暂无紧急采购需求。"
+        parts = [f"## {title}\n"]
+        parts.append(f"共 **{len(table_rows)}** 项采购建议：")
+        for r in table_rows[:5]:
+            parts.append(f"- {r.get('product_name', '')}：建议采购 {r.get('suggested_qty', r.get('suggested_reorder_qty', 0))} 件")
+        if len(table_rows) > 5:
+            parts.append(f"\n...共 {len(table_rows)} 项，详见上方表格。")
+        return "\n".join(parts)
+
+    elif action_type == "dashboard":
+        return f"## {title}\n\n上方图表展示了供应链各环节的综合诊断结果，包括库存健康度、销售趋势、供应商表现等。请重点关注标红的风险项。"
+
+    else:
+        return f"## {title}\n\n数据已加载，请查看上方图表。"
 
 
 @router.post("/chat", response_model=ChatResponse)

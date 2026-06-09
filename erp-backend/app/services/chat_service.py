@@ -55,9 +55,17 @@ SYSTEM_PROMPT = """你是供应链ERP的AI助手。你的能力是调用工具�
 **重要：不要同时调 render_* 和对应的 query_*！**
 
 ## 回复格式（必须返回严格 JSON）
-{"content": "markdown文字", "blocks": []}
-- content 必须包含自然语言分析和建议，绝不能只放原始 JSON 数据、数组或代码。即使工具返回了数据，也要用文字总结关键发现
-- blocks 可选，只在用户明确要看图表时才放内容
+{"content": "markdown分析文字", "blocks": [...]}
+
+- content 必须写自然语言分析文字，必须有结论和建议。绝不能只放原始 JSON 数据、数组或代码
+- content 只写分析结论，不要再以 markdown 表格重复 blocks 中已有的数据
+- blocks 必须包含工具返回的结构化数据（图表或表格），用于前端渲染
+
+## blocks 规则
+1. 查询类工具（query_*、calc_*、recommend_*、analyze_*）返回的数据 → 必须放在 blocks 的 table block 中展示
+2. 画图类工具（render_*）返回的数据 → 必须放在 blocks 的 chart block 或 table block 中展示
+3. 综合类（同时调了 query_* + render_*）→ 可以同时放 table + chart 多个 blocks
+4. 纯文字问题（如"什么是安全库存"）→ blocks 可以为空，只写文字
 
 blocks 中每个元素为以下三种之一：
 图表 block：{"type": "chart", "chartType": "line|bar|pie|heatmap|scatter|radar", "data": {完整 ECharts option}}
@@ -256,6 +264,50 @@ def _user_wants_chart(user_msg: str) -> bool:
     return any(kw in user_msg for kw in chart_keywords)
 
 
+def _summarize_render_result(tool_name: str, result: dict | None) -> str:
+    """将 render 工具的完整结果压缩为摘要，喂给 LLM 第二轮。
+    避免传完整 JSON（浪费 token 且导致 LLM 重复输出 blocks）。
+    明确告知 LLM 图表/表格数据已在前端展示，它只需写分析文字。"""
+    if not result or "error" in result:
+        return json.dumps({"status": "error", "message": result.get("error", "工具执行失败") if result else "无结果"}, ensure_ascii=False)
+
+    # Extract summary info from blocks
+    blocks_info = []
+    if isinstance(result, dict) and result.get("_render"):
+        blocks = result.get("blocks", [])
+        for b in blocks:
+            if b.get("type") == "chart":
+                title = ""
+                data = b.get("data", {})
+                t = data.get("title")
+                if isinstance(t, dict):
+                    title = t.get("text", "")
+                elif isinstance(t, str):
+                    title = t
+                series_count = len(data.get("series", []))
+                blocks_info.append(f"图表[{title}](含{series_count}个系列)")
+            elif b.get("type") == "table":
+                cols = b.get("columns", [])
+                rows = b.get("rows", [])
+                col_names = [c.get("title", c.get("key", "")) for c in cols]
+                blocks_info.append(f"表格[{len(rows)}行×{len(cols)}列: {', '.join(col_names[:6])}]")
+
+    desc = f"工具{tool_name}已执行成功，图表/表格数据已直接发送到前端展示。"
+    if blocks_info:
+        desc += f" 生成内容: {'; '.join(blocks_info)}。"
+    desc += " 你不需要在 blocks 中重复输出这些数据，只需在 content 中写出分析文字和结论。"
+
+    # For table-type results, include a few sample rows for LLM to reference in analysis
+    if isinstance(result, dict) and result.get("_render"):
+        blocks = result.get("blocks", [])
+        for b in blocks:
+            if b.get("type") == "table" and b.get("rows"):
+                sample_rows = b["rows"][:5]
+                desc += f"\n\n表格前5行摘要: {json.dumps(sample_rows, ensure_ascii=False, default=str)}"
+
+    return desc
+
+
 def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
     """主对话函数，处理 Function Calling 循环"""
     if not client:
@@ -338,19 +390,20 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                     "render_comprehensive_diagnosis", "render_purchase_advice",
                     "render_safety_stock_table", "render_transfer_advice_table",
                 ):
-                    # Chart/table render tools: execute, collect direct-render blocks, also feed to LLM
+                    # Chart/table render tools: execute, collect direct-render blocks
                     result = execute_tool(tc.function.name, args, db)
                     if isinstance(result, dict) and result.get("_render"):
                         if "blocks" in result:
-                            # Multi-block format
                             direct_blocks.extend(result["blocks"])
                         else:
-                            # Single block fallback
                             direct_blocks.append(result)
+                    # Feed a SUMMARY to LLM (not full data) — blocks are sent directly to frontend
+                    # This avoids token waste and prevents LLM from duplicating blocks
+                    summary = _summarize_render_result(tc.function.name, result)
                     full_messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
-                        "content": json.dumps(result, ensure_ascii=False, default=str)
+                        "content": summary,
                     })
                 else:
                     args.setdefault("creator_id", creator_id)
@@ -402,12 +455,11 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                         f"前200字: >>>{(raw_content or '')[:200]}<<<")
 
             parsed = _parse_response(raw_content)
-            # Merge direct blocks (charts) — only if user explicitly wants charts
-            wants_chart = _user_wants_chart(user_msg)
-            if wants_chart:
+            # Merge direct blocks (charts/tables from render tools) — always include them
+            # LLM's own blocks are merged AFTER direct_blocks so direct_blocks take priority
+            if direct_blocks:
                 all_blocks = direct_blocks + parsed.get("blocks", [])
                 parsed["blocks"] = _dedup_chart_blocks(all_blocks)
-            # else: LLM may have put blocks in its own response, respect that
             return parsed
 
         # LLM 没调工具：如果是数据类问题，强制重试一次
@@ -462,9 +514,10 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                                 direct_blocks.extend(result["blocks"])
                             else:
                                 direct_blocks.append(result)
+                        summary = _summarize_render_result(tc.function.name, result)
                         full_messages.append({
                             "role": "tool", "tool_call_id": tc.id,
-                            "content": json.dumps(result, ensure_ascii=False, default=str)
+                            "content": summary,
                         })
                     else:
                         args.setdefault("creator_id", creator_id)
@@ -485,8 +538,7 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
                     extra_body={"thinking": {"type": "disabled"}},
                 )
                 parsed = _parse_response(resp2.choices[0].message.content)
-                wants_chart = _user_wants_chart(user_msg)
-                if wants_chart:
+                if direct_blocks:
                     all_blocks = direct_blocks + parsed.get("blocks", [])
                     parsed["blocks"] = _dedup_chart_blocks(all_blocks)
                 return parsed
