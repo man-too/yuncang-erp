@@ -1,7 +1,10 @@
 """AI 对话路由"""
 import json
 import uuid
+import asyncio
+import logging
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -9,8 +12,11 @@ from app.routers.auth import get_current_user
 from app.models.user import User
 from app.models.ai_analysis import AIDecisionRecord
 from app.schemas.chat import ChatRequest, ChatResponse, ExecuteRequest, ExecuteResult
-from app.services.chat_service import chat, build_welcome_context, build_welcome_message
-from app.tools import execute_tool
+from app.services.chat_service import chat, chat_stream, build_welcome_context, build_welcome_message, ANALYSIS_PROMPT
+from app.tools import execute_tool, get_tool_meta
+from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ai", tags=["AI 对话"])
 
@@ -58,6 +64,132 @@ def ai_quick_chart(
     content = _generate_quick_analysis(type, blocks)
 
     return {"content": content, "blocks": blocks}
+
+
+def _sse(event: str, data) -> str:
+    """Format an SSE event string. Data is always JSON-encoded for consistent parsing."""
+    payload = json.dumps(data, ensure_ascii=False, default=str)
+    return f"event: {event}\ndata: {payload}\n\n"
+
+
+@router.get("/quick-chart-stream")
+async def ai_quick_chart_stream(
+    type: str,
+    recent_q: str = "",
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """快捷操作 SSE 流式输出：blocks → template → LLM deep analysis"""
+    tool_name = QUICK_ACTION_TOOLS.get(type)
+    if not tool_name:
+        raise HTTPException(status_code=400, detail=f"不支持的快捷操作类型: {type}")
+
+    async def event_generator():
+        # ── Phase 1: Execute tool & send deterministic blocks (<500ms) ──
+        result = execute_tool(tool_name, {}, db)
+        if not result or "error" in result:
+            yield _sse("blocks", [])
+            yield _sse("content_delta", "数据查询失败，请稍后重试。")
+            yield _sse("done", {})
+            return
+
+        # Extract blocks from render result
+        meta = get_tool_meta(tool_name)
+        if meta and meta.build_blocks:
+            blocks = meta.build_blocks(result)
+        else:
+            # Fallback: manual extraction
+            blocks = []
+            if isinstance(result, dict):
+                if result.get("_render"):
+                    if "blocks" in result:
+                        blocks = result["blocks"]
+                    else:
+                        block = {k: v for k, v in result.items() if k != "_render"}
+                        blocks = [block]
+                elif result.get("type") in ("chart", "table"):
+                    blocks = [result]
+
+        # Send blocks event
+        yield _sse("blocks", blocks)
+
+        # ── Phase 2: Rule-driven template analysis (instant) ──
+        template_text = ""
+        if meta and meta.nl_template:
+            try:
+                template_text = meta.nl_template(result)
+            except Exception as e:
+                logger.warning(f"[SSE] nl_template error for {tool_name}: {e}")
+                template_text = ""
+
+        if template_text:
+            yield _sse("content_delta", template_text)
+
+        # ── Phase 3: LLM deep analysis streamed token by token (2-3s) ──
+        llm_succeeded = False
+        if settings.OPENAI_API_KEY:
+            try:
+                from openai import OpenAI
+                client = OpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.AI_BASE_URL)
+
+                # Condense result for LLM context
+                condensed = result
+                if meta and meta.condense:
+                    try:
+                        condensed = meta.condense(result)
+                    except Exception:
+                        pass
+
+                prompt = (
+                    f"{ANALYSIS_PROMPT}\n\n"
+                    f"图表/表格数据已直接发送到前端展示，你只需在 content 中写出分析文字和结论，"
+                    f"不要在 blocks 中重复输出这些数据。\n\n"
+                    f"工具: {tool_name}\n"
+                    f"数据摘要: {json.dumps(condensed, ensure_ascii=False, default=str)}"
+                )
+                if recent_q:
+                    prompt += f"\n用户最近的问题: {recent_q}"
+
+                stream = client.chat.completions.create(
+                    model=settings.OPENAI_MODEL,
+                    messages=[
+                        {"role": "system", "content": ANALYSIS_PROMPT},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.5,
+                    max_tokens=1024,
+                    stream=True,
+                    extra_body={"thinking": {"type": "disabled"}},
+                )
+
+                for chunk in stream:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        token = chunk.choices[0].delta.content
+                        yield _sse("content_delta", token)
+                        llm_succeeded = True
+                        # Yield control to event loop for real-time streaming
+                        await asyncio.sleep(0)
+
+            except Exception as e:
+                logger.warning(f"[SSE] LLM streaming error for {tool_name}: {e}")
+                # Silently skip — template already provided basic analysis
+
+        # If LLM didn't produce any content and no template either, add fallback
+        if not llm_succeeded and not template_text:
+            yield _sse("content_delta", "数据已加载，请查看下方图表/表格。")
+
+        # ── Phase 4: Done ──
+        yield _sse("done", {})
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # 快捷操作默认分析文字模板
@@ -226,6 +358,49 @@ def ai_chat(
     result = chat(messages, db, creator_id=user.id)
     result["conversation_id"] = conversation_id
     return result
+
+
+@router.post("/chat/stream")
+async def ai_chat_stream(
+    req: ChatRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """AI 对话 SSE 流式输出：blocks → content_delta → done"""
+    conversation_id = req.conversation_id or uuid.uuid4().hex[:12]
+
+    if not req.messages:
+        context = build_welcome_context(db)
+        result = build_welcome_message(context)
+
+        def welcome_gen():
+            yield _sse("blocks", result.get("blocks", []))
+            yield _sse("content_delta", result.get("content", ""))
+            yield _sse("done", {"conversation_id": conversation_id})
+
+        return StreamingResponse(welcome_gen(), media_type="text/event-stream")
+
+    messages = [{"role": m.role, "content": m.content} for m in req.messages]
+
+    def generate():
+        for event in chat_stream(messages, db, creator_id=user.id):
+            if event["type"] == "blocks":
+                yield _sse("blocks", event["data"])
+            elif event["type"] == "content_delta":
+                yield _sse("content_delta", event["text"])
+            elif event["type"] == "done":
+                event["data"]["conversation_id"] = conversation_id
+                yield _sse("done", event["data"])
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/execute", response_model=ExecuteResult)

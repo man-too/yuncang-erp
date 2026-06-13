@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.database import get_db
-from app.models.purchase import PurchaseOrder, PurchaseOrderItem, PurchaseInbound
+from app.models.purchase import PurchaseOrder, PurchaseOrderItem, PurchaseInbound, PurchaseOrderStatus
 from app.models.inventory import Inventory, InventoryRecord
 from app.models.product import Product
 from app.schemas.business import PurchaseOrderCreate, PurchaseInboundCreate, PurchaseOrderResponse

@@ -118,6 +118,13 @@
 
         <!-- Sales Forecast Chart -->
         <div class="expand-chart-section">
+          <div class="chart-toolbar">
+            <div class="time-tabs">
+              <div class="time-tab" :class="{ active: detailTimeRange === '7d' }" @click="setDetailTimeRange('7d')">近7天</div>
+              <div class="time-tab" :class="{ active: detailTimeRange === '30d' }" @click="setDetailTimeRange('30d')">近30天</div>
+              <div class="time-tab" :class="{ active: detailTimeRange === '3m' }" @click="setDetailTimeRange('3m')">近3个月</div>
+            </div>
+          </div>
           <div v-loading="detailChartLoading" class="chart-area" style="height: 300px;">
             <v-chart
               v-if="!detailChartLoading && (detailHistoryData.length > 0 || detailPredictionData.length > 0)"
@@ -520,6 +527,7 @@ const detailChartLoading = ref(false)
 const detailHistoryData = ref<any[]>([])
 const detailPredictionData = ref<number[]>([])
 const detailPredictionDates = ref<string[]>([])
+const detailTimeRange = ref<'7d' | '30d' | '3m'>('30d')
 
 function getFutureDates(lastDate: string | null, count: number): string[] {
   if (!lastDate) return Array.from({ length: count }, (_, i) => `D+${i + 1}`)
@@ -531,55 +539,126 @@ function getFutureDates(lastDate: string | null, count: number): string[] {
   })
 }
 
+function aggregateWeekly(dailyData: any[]): any[] {
+  if (dailyData.length === 0) return []
+  const weeks: any[] = []
+  let currentWeek: any[] = []
+  let weekStart = ''
+  for (const d of dailyData) {
+    const date = new Date(d.date)
+    const dayOfWeek = date.getDay()
+    if (dayOfWeek === 1 && currentWeek.length > 0) {
+      const totalQty = currentWeek.reduce((s: number, x: any) => s + (x.total_qty || 0), 0)
+      weeks.push({
+        date: weekStart,
+        dateLabel: `${weekStart.slice(5)}~${currentWeek[currentWeek.length - 1].date.slice(5)}`,
+        total_qty: totalQty,
+      })
+      currentWeek = []
+    }
+    if (currentWeek.length === 0) weekStart = d.date
+    currentWeek.push(d)
+  }
+  if (currentWeek.length > 0) {
+    const totalQty = currentWeek.reduce((s: number, x: any) => s + (x.total_qty || 0), 0)
+    weeks.push({
+      date: weekStart,
+      dateLabel: `${weekStart.slice(5)}~${currentWeek[currentWeek.length - 1].date.slice(5)}`,
+      total_qty: totalQty,
+    })
+  }
+  return weeks
+}
+
 const detailChartOption = computed(() => {
-  const histDates = detailHistoryData.value.map((d: any) => d.date)
-  const histValues = detailHistoryData.value.map((d: any) => d.total_qty || 0)
+  const range = detailTimeRange.value
   const predDates = detailPredictionDates.value
   const predValues = detailPredictionData.value
 
+  // 3m: weekly aggregation, no prediction overlay
+  if (range === '3m') {
+    const weeklyData = aggregateWeekly(detailHistoryData.value)
+    const dates = weeklyData.map((d: any) => d.dateLabel)
+    const values = weeklyData.map((d: any) => d.total_qty || 0)
+    return {
+      tooltip: {
+        trigger: 'axis' as const,
+        axisPointer: { type: 'shadow' as const },
+        formatter: (params: any) => {
+          const p = params[0]
+          return `${p.axisValue}<br/>${p.marker} 周销量: ${p.value}`
+        },
+      },
+      grid: { left: 50, right: 20, top: 20, bottom: 50 },
+      xAxis: { type: 'category' as const, data: dates, axisLabel: { fontSize: 11, rotate: 30 } },
+      yAxis: { type: 'value' as const, name: '周销量' },
+      dataZoom: [
+        { type: 'inside' as const, start: 0, end: 100 },
+        { type: 'slider' as const, start: 0, end: 100, height: 18, bottom: 5 },
+      ],
+      series: [{
+        name: '周销量', type: 'line' as const, smooth: true, data: values,
+        showSymbol: true, symbol: 'circle', symbolSize: 7,
+        lineStyle: { color: '#005BF5', width: 2.5 },
+        areaStyle: { color: 'rgba(0,91,245,0.12)' },
+        emphasis: { scale: 1.8 },
+      }],
+    }
+  }
+
+  // 7d / 30d: daily data with prediction overlay
+  const histDates = detailHistoryData.value.map((d: any) => d.date)
+  const histValues = detailHistoryData.value.map((d: any) => d.total_qty || 0)
   const xData = [...histDates, ...predDates]
   const histSeries = [...histValues, ...Array(predDates.length).fill(null)] as (number | null)[]
   const predSeries = [...Array(histValues.length).fill(null), ...predValues] as (number | null)[]
 
+  if (range === '7d') {
+    return {
+      tooltip: { trigger: 'axis' as const, axisPointer: { type: 'cross' as const } },
+      legend: { data: ['历史销量', '预测销量'], bottom: 0 },
+      grid: { left: 50, right: 20, top: 20, bottom: 30 },
+      xAxis: { type: 'category' as const, data: xData, axisLabel: { fontSize: 11 } },
+      yAxis: { type: 'value' as const, name: '销量' },
+      series: [
+        {
+          name: '历史销量', type: 'line' as const, smooth: true, data: histSeries,
+          showSymbol: true, symbol: 'circle', symbolSize: 8,
+          lineStyle: { color: '#005BF5', width: 2.5 },
+          areaStyle: { color: 'rgba(0,91,245,0.12)' },
+          label: { show: true, position: 'top' as const, fontSize: 11, fontWeight: 600 },
+        },
+        {
+          name: '预测销量', type: 'line' as const, smooth: true, data: predSeries,
+          showSymbol: true, symbol: 'diamond', symbolSize: 7,
+          lineStyle: { color: '#fc8452', width: 2, type: 'dashed' as const },
+          areaStyle: { color: 'rgba(252,132,82,0.1)' },
+          itemStyle: { color: '#fc8452' },
+        },
+      ],
+    }
+  }
+
+  // 30d default: daily + dataZoom slider
   return {
-    tooltip: {
-      trigger: 'axis' as const,
-      axisPointer: { type: 'cross' as const, crossStyle: { color: '#999' } },
-    },
-    legend: {
-      data: ['历史销量', '预测销量'],
-      bottom: 0,
-    },
-    grid: { left: 50, right: 20, top: 20, bottom: 40 },
-    xAxis: {
-      type: 'category' as const,
-      data: xData,
-      axisLabel: { fontSize: 11 },
-    },
-    yAxis: {
-      type: 'value' as const,
-      name: '销量',
-    },
-    dataZoom: [{ type: 'inside' as const, start: 0, end: 100 }],
+    tooltip: { trigger: 'axis' as const, axisPointer: { type: 'cross' as const, crossStyle: { color: '#999' } } },
+    legend: { data: ['历史销量', '预测销量'], bottom: 0 },
+    grid: { left: 50, right: 20, top: 20, bottom: 50 },
+    xAxis: { type: 'category' as const, data: xData, axisLabel: { fontSize: 11 } },
+    yAxis: { type: 'value' as const, name: '销量' },
+    dataZoom: [
+      { type: 'inside' as const, start: 0, end: 100 },
+      { type: 'slider' as const, start: 0, end: 100, height: 18, bottom: 5 },
+    ],
     series: [
       {
-        name: '历史销量',
-        type: 'line' as const,
-        smooth: true,
-        data: histSeries,
-        showSymbol: true,
-        symbol: 'circle',
-        symbolSize: 5,
+        name: '历史销量', type: 'line' as const, smooth: true, data: histSeries,
+        showSymbol: true, symbol: 'circle', symbolSize: 5,
         lineStyle: { color: '#005BF5', width: 2 },
       },
       {
-        name: '预测销量',
-        type: 'line' as const,
-        smooth: true,
-        data: predSeries,
-        showSymbol: true,
-        symbol: 'diamond',
-        symbolSize: 7,
+        name: '预测销量', type: 'line' as const, smooth: true, data: predSeries,
+        showSymbol: true, symbol: 'diamond', symbolSize: 7,
         lineStyle: { color: '#fc8452', width: 2, type: 'dashed' as const },
         areaStyle: { color: 'rgba(252,132,82,0.1)' },
         itemStyle: { color: '#fc8452' },
@@ -587,6 +666,13 @@ const detailChartOption = computed(() => {
     ],
   }
 })
+
+async function setDetailTimeRange(range: '7d' | '30d' | '3m') {
+  detailTimeRange.value = range
+  if (expandedProductId.value != null) {
+    await loadDetailData(expandedProductId.value)
+  }
+}
 
 // =========================================================================
 // Detail: ROP Calculation
@@ -605,8 +691,10 @@ async function loadDetailData(productId: number) {
 
   try {
     // Load sales history + prediction in parallel with ROP
+    const daysMap = { '7d': 7, '30d': 30, '3m': 90 }
+    const days = daysMap[detailTimeRange.value] || 30
     const [history, pred, rop] = await Promise.allSettled([
-      aiApi.salesHistory({ product_id: productId, days: 90 }),
+      aiApi.salesHistory({ product_id: productId, days }),
       aiApi.salesPrediction(productId),
       store.fetchSuggestedQty(productId),
     ])
@@ -628,8 +716,8 @@ async function loadDetailData(productId: number) {
           ? detailHistoryData.value[detailHistoryData.value.length - 1].date
           : null
       if (parsed?.predictions && Array.isArray(parsed.predictions)) {
-        detailPredictionData.value = parsed.predictions
-        detailPredictionDates.value = getFutureDates(lastDate, parsed.predictions.length)
+        detailPredictionData.value = parsed.predictions.slice(0, 7)
+        detailPredictionDates.value = getFutureDates(lastDate, 7)
       } else if (parsed?.forecast_next_30d) {
         const dailyAvg = Math.round(parsed.forecast_next_30d / 30)
         detailPredictionData.value = Array.from({ length: 7 }, () => dailyAvg)
@@ -963,6 +1051,35 @@ onMounted(async () => {
 /* Chart Area */
 .expand-chart-section {
   margin: 0;
+}
+.chart-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.time-tabs {
+  display: flex;
+  gap: 4px;
+}
+.time-tab {
+  padding: 4px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #666;
+  cursor: pointer;
+  border: 1px solid #ddd;
+  transition: all 0.2s;
+  user-select: none;
+  background: #fff;
+}
+.time-tab:hover {
+  border-color: #409eff;
+  color: #409eff;
+}
+.time-tab.active {
+  background: #409eff;
+  color: #fff;
+  border-color: #409eff;
 }
 .chart-area {
   min-height: 300px;

@@ -1,97 +1,112 @@
-"""AI 对话服务 — 单 Agent + Function Calling"""
+"""AI 对话服务 — 两层串联 + 纯文本分析 + 流式版本
+
+架构:
+  Layer 1 (ROUTING_PROMPT): LLM 选择工具调用，不生成分析文字
+  Layer 2 (ANALYSIS_PROMPT): LLM 根据精简数据写纯文本分析，不输出 JSON
+
+chat()       → 非流式，返回 {"content": ..., "blocks": [...]}
+chat_stream() → 流式，yield {"type": "blocks"/"content_delta"/"done", ...}
+"""
 import json
-import uuid
 import logging
+from dataclasses import dataclass
 from datetime import date, timedelta
 from openai import OpenAI
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.config import settings
-from app.tools import ALL_TOOLS, execute_tool
+from app.tools import ALL_TOOLS, execute_tool, get_tool_meta
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+# ═══════════════════════════════════════════════════════════════
+# Intent classification — pre_filter layer
+# ═══════════════════════════════════════════════════════════════
+
+ONLY_CHART_KW = ["只要图", "只看图", "给我图", "图就行", "不用分析", "不用解释", "别分析", "图就好"]
+CHART_KW = ["看图", "画图", "趋势图", "走势图", "折线图", "热力图", "柱状图", "排名图", "诊断图", "图表"]
+ACTION_KW = ["下单", "创建订单", "调拨", "创建调拨"]
+DATA_KW = [
+    "销售", "库存", "供应商", "产品", "商品", "订单", "采购", "出库", "入库",
+    "预测", "数据", "统计", "报表", "预警", "风险", "利润", "成本", "金额",
+    "销量", "数量", "热销", "卖", "天气",
+]
+
+
+@dataclass
+class IntentResult:
+    intent: str       # "data_query" | "chart_only" | "casual" | "action"
+    chart_flag: bool  # 是否需要图表
+
+
+def classify_intent(user_msg: str) -> IntentResult:
+    """基于关键词的意图分类，优先级: ONLY_CHART > ACTION > CHART > DATA > casual"""
+    if any(kw in user_msg for kw in ONLY_CHART_KW):
+        return IntentResult(intent="chart_only", chart_flag=True)
+    if any(kw in user_msg for kw in ACTION_KW):
+        return IntentResult(intent="action", chart_flag=False)
+    if any(kw in user_msg for kw in CHART_KW):
+        return IntentResult(intent="data_query", chart_flag=True)
+    if any(kw in user_msg for kw in DATA_KW):
+        return IntentResult(intent="data_query", chart_flag=False)
+    return IntentResult(intent="casual", chart_flag=False)
+
+
+def _infer_chart_flag(tool_calls: list) -> bool:
+    """从 LLM 选择的工具推断是否需要图表"""
+    for tc in tool_calls:
+        name = tc.function.name if hasattr(tc, "function") else tc.get("function", {}).get("name", "")
+        meta = get_tool_meta(name)
+        if meta and meta.category == "render":
+            return True
+    return False
+
+
+# ═══════════════════════════════════════════════════════════════
+# Prompt constants — Layer 1 routing + Layer 2 analysis
+# ═══════════════════════════════════════════════════════════════
+
+ROUTING_PROMPT = """你是供应链ERP的AI助手。用户问业务数据时必须调用工具查询真实数据，不能凭空回答。不要假设参数值，不确定时先问用户。只能使用提供的工具，不要编造工具。
+
+## 工具选择步骤
+Step 1: 用户要图表（含"图/画图/看图/趋势图/热力图/排名图/诊断图"等）→ 调 render_*，不要再调对应的 query_*
+Step 2: 用户不要图表 → 调 query_* 或 calc_* 查数据，用文字回复
+Step 3: 用户要补货推荐 → recommend_restock；供应商推荐 → recommend_supplier；采购审核 → audit_purchase_plan
+Step 4: 操作类（create_purchase_order / create_stock_transfer）→ 只输出 action block，需用户确认"""
+
+ANALYSIS_PROMPT = """你是供应链分析师。根据工具返回的数据写分析。
+
+规则：
+1. 结论 + 行动建议，200字以内
+2. 只引用数据中存在的数字，不编造
+3. 数据不足时明确说"缺少XX数据，建议查询YY"
+4. 纯文本，不输出 JSON、不调工具
+
+好：电子元件A仅剩2.7天库存，低于14天交期，建议立即下单≥42件。
+差：✗"建议优化管理流程"（无数据支撑）✗输出JSON ✗重复描述数据 ✗超过200字
+
+现在请分析以下数据："""
+
+ANALYSIS_HINT_RENDER = "图表/表格数据已直接发送到前端展示，你只需写出分析文字和结论，不要重复输出这些数据。"
+
+DATA_HINT = "用户问的是业务数据问题，必须调用工具获取真实数据，不能凭空回答。用户要图时直接调 render_*（不要先调 query_* 查数据），只要数据时用 query_* + calc_*。"
+
+RETRY_HINT = "警告：你刚才没有调用任何工具就直接回答了。用户问的是业务数据，你必须调用工具查询真实数据库，不能凭空回答。现在请重新调用合适的工具来获取数据。"
+
+# ═══════════════════════════════════════════════════════════════
+# OpenAI client
+# ═══════════════════════════════════════════════════════════════
 
 client = None
 if settings.OPENAI_API_KEY:
     client = OpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.AI_BASE_URL)
 
-SYSTEM_PROMPT = """你是供应链ERP的AI助手。你的能力是调用工具查询数据库，同时可以帮助用户查询天气信息，然后根据问题类型选择回复方式。
 
-## 核心原则
-用户问的是业务数据问题，你必须调用合适的工具查询真实数据，不能只靠自己的知识回答。
-如果用户要求看图或明确要求图表时才调用 render_* 画图工具，其余情况下采用正常的文本回答。
-
-## 回复策略
-- 用户问具体数值（"多少""几个""多少钱""库存量""销量""金额"等）→ 调用 query_* 工具查数据，文字回复，不画图
-- 用户要图表（"画图""看图""趋势图""排名图""热力图""柱状图""折线图"等）→ 调用 render_* 工具，图表展示 + 文字分析
-- 不确定用户意图时 → 文字回复，不画图。宁可少画图也不要乱画图
-- 用户说"分析""对比""排名"但没有明确要图 → 调用 query_* 查数据，用表格或文字回复
-
-## 工具选择（关键：区分 query_* 和 render_*）
-**查询类工具（只查数据，不画图）：**
-- 库存数量/状态 → query_inventory
-- 销量/销售金额/卖了多少 → query_sales_history
-- 供应商信息/评分 → query_suppliers
-- 产品信息/价格 → query_products
-- ROP/安全库存/补货量 → calc_reorder_point
-- 供应商评分+风险 → calc_supplier_score
-- 库存周转/呆滞/资金 → calc_inventory_kpi
-- 天气查询/天气情况/天气对产品影响 → query_weather（用户问天气预报、天气状况、天气对销售/采购的影响时调用）
-
-**画图类工具（仅在用户明确要图表时才调用）：**
-- 库存热力图 → render_inventory_heatmap（用户说"看库存图""库存热力图"时）
-- 销售趋势图 → render_sales_trend（用户说"看趋势图""销量走势图"时）
-- 供应商排名图 → render_supplier_ranking（用户说"看供应商排名图"时）
-- 供应链诊断图 → render_comprehensive_diagnosis（用户说"看诊断图"时）
-- 采购建议图 → render_purchase_advice（用户说"看采购建议图"时）
-
-**推荐类工具（返回建议，自带分析）：**
-- 补货推荐 → recommend_restock
-- 供应商推荐 → recommend_supplier
-- 采购计划审核 → audit_purchase_plan
-
-**重要：不要同时调 render_* 和对应的 query_*！**
-
-## 回复格式（必须返回严格 JSON）
-{"content": "markdown分析文字", "blocks": [...]}
-
-**content 和 blocks 的职责（严格遵守）：**
-- content：自然语言分析文字，必须有结论和建议。这是用户阅读的主体内容，**绝不能为空**
-- blocks：结构化数据（图表/表格/操作按钮），用于前端渲染组件，**不是放文字的地方**
-- content 不要用 markdown 表格重复 blocks 中已有的数据
-- 如果调了 render_* 工具，blocks 会被系统自动填充，你只需在 content 写分析
-- 如果调了 query_* 工具，你需要把数据放进 blocks 的 table block，content 写分析
-
-## blocks 规则
-1. 查询类工具（query_*、calc_*、recommend_*、analyze_*）返回的数据 → 必须放在 blocks 的 table block 中展示
-2. 画图类工具（render_*）返回的数据 → 必须放在 blocks 的 chart block 或 table block 中展示
-3. 综合类（同时调了 query_* + render_*）→ 可以同时放 table + chart 多个 blocks
-4. 纯文字问题（如"什么是安全库存"）→ blocks 可以为空，只写文字
-
-blocks 中每个元素为以下三种之一：
-图表 block：{"type": "chart", "chartType": "line|bar|pie|heatmap|scatter|radar", "data": {完整 ECharts option}}
-表格 block：{"type": "table", "columns": [{"key": "键", "title": "列标题"}], "rows": [{"键": "值"}]}
-操作按钮 block：{"type": "actions", "actions": [{"label": "按钮文字", "action": "create_purchase_order|create_stock_transfer", "params": {...}, "confirmTitle": "确认标题", "confirmDetail": "详细描述"}]}
-
-## 库存分析规则
-当你决定输出库存相关图表时，在 content 中补充：
-1. 列出需补货的产品及建议补货量
-2. 说明理由（当前库存量、安全库存量、近期销量趋势）
-3. 按紧迫程度排序，控制在 200 字以内
-
-## 行为准则
-- 无法获取数据时，content 说明原因，blocks 为空，不编造数据
-- 分析结果表明需要补货 → 附带采购操作按钮
-- 仓库间库存不均衡 → 附带调拨操作按钮
-- 跨领域问题 → 依次调用多个工具再综合分析
-- 保持专业、简洁、可执行的风格
-
-以下操作只能以 action block 输出，不能直接调用工具执行：
-- create_purchase_order: 创建采购订单
-- create_stock_transfer: 创建库存调拨单"""
-
+# ═══════════════════════════════════════════════════════════════
+# Welcome context (unchanged)
+# ═══════════════════════════════════════════════════════════════
 
 def build_welcome_context(db: Session) -> dict:
     """预加载会话摘要上下文"""
@@ -259,306 +274,117 @@ def build_welcome_message(context: dict) -> dict:
     return {"content": content, "blocks": blocks}
 
 
-def _user_wants_chart(user_msg: str) -> bool:
-    """判断用户是否明确要求看图表"""
-    chart_keywords = ["图", "图表", "画图", "看图", "趋势图", "走势图", "折线图",
-                      "热力图", "柱状图", "排名图", "对比图", "雷达图", "仪表盘",
-                      "诊断图", "可视化", "可视化图表"]
-    return any(kw in user_msg for kw in chart_keywords)
+# ═══════════════════════════════════════════════════════════════
+# Helper functions
+# ═══════════════════════════════════════════════════════════════
+
+def _call_llm_once(messages, tool_choice="auto", temperature=0.3):
+    """Single LLM call with tools"""
+    return client.chat.completions.create(
+        model=settings.OPENAI_MODEL,
+        messages=messages,
+        tools=ALL_TOOLS,
+        tool_choice=tool_choice,
+        temperature=temperature,
+        max_tokens=8192,
+        extra_body={"thinking": {"type": "disabled"}},
+    )
 
 
-def _summarize_render_result(tool_name: str, result: dict | None) -> str:
-    """将 render 工具的完整结果压缩为摘要，喂给 LLM 第二轮。
-    避免传完整 JSON（浪费 token 且导致 LLM 重复输出 blocks）。
-    明确告知 LLM 图表/表格数据已在前端展示，它只需写分析文字。"""
-    if not result or "error" in result:
-        return json.dumps({"status": "error", "message": result.get("error", "工具执行失败") if result else "无结果"}, ensure_ascii=False)
-
-    # Extract summary info from blocks
-    blocks_info = []
-    if isinstance(result, dict) and result.get("_render"):
-        blocks = result.get("blocks", [])
-        for b in blocks:
-            if b.get("type") == "chart":
-                title = ""
-                data = b.get("data", {})
-                t = data.get("title")
-                if isinstance(t, dict):
-                    title = t.get("text", "")
-                elif isinstance(t, str):
-                    title = t
-                series_count = len(data.get("series", []))
-                blocks_info.append(f"图表[{title}](含{series_count}个系列)")
-            elif b.get("type") == "table":
-                cols = b.get("columns", [])
-                rows = b.get("rows", [])
-                col_names = [c.get("title", c.get("key", "")) for c in cols]
-                blocks_info.append(f"表格[{len(rows)}行×{len(cols)}列: {', '.join(col_names[:6])}]")
-
-    desc = f"工具{tool_name}已执行成功，图表/表格数据已直接发送到前端展示。"
-    if blocks_info:
-        desc += f" 生成内容: {'; '.join(blocks_info)}。"
-    desc += " 你不需要在 blocks 中重复输出这些数据，只需在 content 中写出分析文字和结论。"
-
-    # For table-type results, include a few sample rows for LLM to reference in analysis
-    if isinstance(result, dict) and result.get("_render"):
-        blocks = result.get("blocks", [])
-        for b in blocks:
-            if b.get("type") == "table" and b.get("rows"):
-                sample_rows = b["rows"][:5]
-                desc += f"\n\n表格前5行摘要: {json.dumps(sample_rows, ensure_ascii=False, default=str)}"
-
-    return desc
+def _build_assistant_msg(msg) -> dict:
+    """Build assistant message dict from LLM response"""
+    assistant_msg = {
+        "role": "assistant",
+        "content": msg.content or "",
+        "tool_calls": [
+            {"id": tc.id, "type": "function",
+             "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+            for tc in msg.tool_calls
+        ],
+    }
+    if hasattr(msg, 'reasoning_content') and msg.reasoning_content:
+        assistant_msg["reasoning_content"] = msg.reasoning_content
+    return assistant_msg
 
 
-def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
-    """主对话函数，处理 Function Calling 循环"""
-    if not client:
-        return {
-            "content": "AI 服务未配置，请在 .env 中设置 OPENAI_API_KEY。",
-            "blocks": [],
-        }
+def _template_fallback(tool_calls, tool_cache: dict, db) -> str:
+    """Rule template fallback — uses cache, no re-execution"""
+    for tc in tool_calls:
+        name = tc.function.name if hasattr(tc, "function") else tc.get("function", {}).get("name", "")
+        meta = get_tool_meta(name)
+        if meta and meta.nl_template:
+            cached_result = tool_cache.get(name)
+            if cached_result:
+                return meta.nl_template(cached_result)
+    return "数据已加载，请查看下方图表/表格。"
 
-    full_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
 
-    # 预处理：检测用户是否问数据问题，强制加一条 tool_trigger 提示
-    user_msg = messages[-1].get("content", "") if messages else ""
-    data_keywords = ["销售", "库存", "供应商", "产品", "商品", "订单", "采购", "出库", "入库",
-                     "预测", "数据", "统计", "报表", "预警", "风险", "利润", "成本",
-                     "金额", "销量", "数量", "热销", "卖", "天气"]
-    if any(kw in user_msg for kw in data_keywords):
-        full_messages.insert(1, {
-            "role": "system",
-            "content": "用户问的是业务数据问题，调用合适的工具来查询真实数据，如果用户要求看或者明确要求要图的时候就调用画图工具，其余情况下"
-                       "采用正常的文本回答，所有结果不能只靠自己的知识回答。",
-        })
+# ═══════════════════════════════════════════════════════════════
+# _process_tool_calls — unified tool processing
+# ═══════════════════════════════════════════════════════════════
 
-    try:
-        resp = client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=full_messages,
-            tools=ALL_TOOLS,
-            tool_choice="auto",
-            temperature=0.3,
-            max_tokens=8192,
-            extra_body={"thinking": {"type": "disabled"}},
-        )
-        msg = resp.choices[0].message
+def _process_tool_calls(tool_calls: list, db: Session, creator_id: int) -> tuple[list, list, list[dict], dict]:
+    """统一处理 LLM 返回的工具调用
 
-        # ═══ 日志①：第一次 AI 调用结果 ═══
-        logger.info(f"[Chat] 第一次调 AI | 模型: {resp.model} | finish: {resp.choices[0].finish_reason} | token: {resp.usage}")
-        if msg.tool_calls:
-            logger.info(f"[Chat] AI 决定调 {len(msg.tool_calls)} 个工具: {[tc.function.name for tc in msg.tool_calls]}")
-        else:
-            logger.info(f"[Chat] AI 直接回答（未调工具）, content长度={len(msg.content or '')}")
+    Returns:
+        (direct_blocks, condense_texts, tool_results, tool_cache)
+    """
+    direct_blocks = []
+    condense_texts = []
+    tool_results = []
+    tool_cache = {}
 
-        if msg.tool_calls:
-            assistant_msg: dict = {
-                "role": "assistant",
-                "content": msg.content or "",
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {"name": tc.function.name, "arguments": tc.function.arguments}
-                    }
-                    for tc in msg.tool_calls
-                ]
-            }
-            # DeepSeek thinking models require reasoning_content to be passed back
-            if hasattr(msg, 'reasoning_content') and msg.reasoning_content:
-                assistant_msg["reasoning_content"] = msg.reasoning_content
-            full_messages.append(assistant_msg)
+    for tc in tool_calls:
+        name = tc.function.name if hasattr(tc, "function") else tc.get("function", {}).get("name", "")
+        try:
+            args = json.loads(tc.function.arguments if hasattr(tc, "function") else tc["function"]["arguments"])
+        except json.JSONDecodeError:
+            args = {}
 
-            direct_blocks: list = []
+        tc_id = tc.id if hasattr(tc, "id") else tc.get("id", "")
+        meta = get_tool_meta(name)
+        result = None
 
-            for tc in msg.tool_calls:
-                try:
-                    args = json.loads(tc.function.arguments)
-                except json.JSONDecodeError:
-                    args = {}
-                # Action tools must not execute here — return action block instead
-                if tc.function.name in ("create_purchase_order", "create_stock_transfer"):
-                    full_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": json.dumps({
-                            "blocked": True,
-                            "message": "此操作需要用户确认后才能执行，请以 action block 形式输出给用户"
-                        }, ensure_ascii=False)
-                    })
-                elif tc.function.name in (
-                    "render_inventory_heatmap", "render_sales_trend",
-                    "render_supplier_ranking",
-                    "render_comprehensive_diagnosis", "render_purchase_advice",
-                    "render_safety_stock_table", "render_transfer_advice_table",
-                ):
-                    # Chart/table render tools: execute, collect direct-render blocks
-                    result = execute_tool(tc.function.name, args, db)
-                    if isinstance(result, dict) and result.get("_render"):
-                        if "blocks" in result:
-                            direct_blocks.extend(result["blocks"])
-                        else:
-                            direct_blocks.append(result)
-                    # Feed a SUMMARY to LLM (not full data) — blocks are sent directly to frontend
-                    # This avoids token waste and prevents LLM from duplicating blocks
-                    summary = _summarize_render_result(tc.function.name, result)
-                    full_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": summary,
-                    })
-                else:
-                    args.setdefault("creator_id", creator_id)
-                    result = execute_tool(tc.function.name, args, db)
-                    full_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": json.dumps(result, ensure_ascii=False, default=str)
-                    })
-
-            # ═══ 日志②：工具执行完毕，准备第二次调 AI ═══
-            logger.info(f"[Chat] 工具执行完毕, full_messages共{len(full_messages)}条, direct_blocks={len(direct_blocks)}个")
-
-            # Second call: LLM analyzes tool results and generates response with blocks
-            try:
-                resp2 = client.chat.completions.create(
-                    model=settings.OPENAI_MODEL,
-                    messages=full_messages,
-                    temperature=0.5,
-                    max_tokens=4096,
-                    tools=ALL_TOOLS,
-                    tool_choice="auto",
-                    response_format={"type": "json_object"},
-                    extra_body={"thinking": {"type": "disabled"}},
-                )
-            except Exception as e:
-                if "response_format" in str(e).lower() or "json_object" in str(e).lower():
-                    resp2 = client.chat.completions.create(
-                        model=settings.OPENAI_MODEL,
-                        messages=full_messages,
-                        temperature=0.5,
-                        max_tokens=4096,
-                        tools=ALL_TOOLS,
-                        tool_choice="auto",
-                        extra_body={"thinking": {"type": "disabled"}},
-                    )
-                else:
-                    raise
-            raw_content = resp2.choices[0].message.content
-
-            # Bug 1.4: Handle reasoning_content from second LLM call (DeepSeek thinking models)
-            msg2 = resp2.choices[0].message
-            if hasattr(msg2, 'reasoning_content') and msg2.reasoning_content:
-                logger.info(f"[Chat] 第二次调用有 reasoning_content, 长度={len(msg2.reasoning_content)}")
-
-            # ═══ 日志③：第二次 AI 调用结果 ═══
-            logger.info(f"[Chat] 第二次调 AI | finish: {resp2.choices[0].finish_reason} | "
-                        f"token: {resp2.usage} | content长度={len(raw_content or '')} | "
-                        f"前200字: >>>{(raw_content or '')[:200]}<<<")
-
-            parsed = _parse_response(raw_content)
-            # Merge direct blocks (charts/tables from render tools) — always include them
-            # LLM's own blocks are merged AFTER direct_blocks so direct_blocks take priority
-            if direct_blocks:
-                all_blocks = direct_blocks + parsed.get("blocks", [])
-                parsed["blocks"] = _dedup_chart_blocks(all_blocks)
-            return parsed
-
-        # LLM 没调工具：如果是数据类问题，强制重试一次
-        is_data_query = any(kw in user_msg for kw in data_keywords)
-        if is_data_query:
-            full_messages.append({
-                "role": "system",
-                "content": "警告：你刚才没有调用任何工具就直接回答了。用户问的是业务数据，你必须调用工具查询真实数据库，不能凭空回答。现在请重新调用合适的工具来获取数据。",
+        if meta and meta.requires_confirm:
+            tool_results.append({
+                "role": "tool", "tool_call_id": tc_id,
+                "content": json.dumps({"blocked": True, "message": "此操作需要用户确认后才能执行"}, ensure_ascii=False)
             })
-            retry = client.chat.completions.create(
-                model=settings.OPENAI_MODEL,
-                messages=full_messages,
-                tools=ALL_TOOLS,
-                tool_choice="auto",
-                temperature=0.3,
-                max_tokens=8192,
-                extra_body={"thinking": {"type": "disabled"}},
-            )
-            retry_msg = retry.choices[0].message
-            if retry_msg.tool_calls:
-                # Replace msg with retry result
-                msg = retry_msg
-                # Re-construct assistant_msg and continue to tool processing
-                assistant_msg = {
-                    "role": "assistant",
-                    "content": msg.content or "",
-                    "tool_calls": [
-                        {"id": tc.id, "type": "function",
-                         "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-                        for tc in msg.tool_calls
-                    ],
-                }
-                if hasattr(msg, 'reasoning_content') and msg.reasoning_content:
-                    assistant_msg["reasoning_content"] = msg.reasoning_content
-                full_messages.append(assistant_msg)
+        else:
+            args.setdefault("creator_id", creator_id)
+            result = execute_tool(name, args, db)
 
-                direct_blocks = []
-                for tc in msg.tool_calls:
-                    try:
-                        args = json.loads(tc.function.arguments)
-                    except json.JSONDecodeError:
-                        args = {}
-                    if tc.function.name in ("create_purchase_order", "create_stock_transfer"):
-                        full_messages.append({
-                            "role": "tool", "tool_call_id": tc.id,
-                            "content": json.dumps({"blocked": True, "message": "需用户确认"}, ensure_ascii=False)
-                        })
-                    elif tc.function.name in ("render_inventory_heatmap", "render_sales_trend", "render_supplier_ranking", "render_comprehensive_diagnosis", "render_purchase_advice", "render_safety_stock_table", "render_transfer_advice_table"):
-                        result = execute_tool(tc.function.name, args, db)
-                        if isinstance(result, dict) and result.get("_render"):
-                            if "blocks" in result:
-                                direct_blocks.extend(result["blocks"])
-                            else:
-                                direct_blocks.append(result)
-                        summary = _summarize_render_result(tc.function.name, result)
-                        full_messages.append({
-                            "role": "tool", "tool_call_id": tc.id,
-                            "content": summary,
-                        })
-                    else:
-                        args.setdefault("creator_id", creator_id)
-                        result = execute_tool(tc.function.name, args, db)
-                        full_messages.append({
-                            "role": "tool", "tool_call_id": tc.id,
-                            "content": json.dumps(result, ensure_ascii=False, default=str)
-                        })
+            # Block layer: deterministic build
+            if meta and meta.build_blocks:
+                direct_blocks.extend(meta.build_blocks(result))
+            elif isinstance(result, dict) and result.get("_render"):
+                direct_blocks.extend(result.get("blocks", []))
 
-                resp2 = client.chat.completions.create(
-                    model=settings.OPENAI_MODEL,
-                    messages=full_messages,
-                    temperature=0.5,
-                    max_tokens=4096,
-                    tools=ALL_TOOLS,
-                    tool_choice="auto",
-                    response_format={"type": "json_object"},
-                    extra_body={"thinking": {"type": "disabled"}},
-                )
-                parsed = _parse_response(resp2.choices[0].message.content)
-                if direct_blocks:
-                    all_blocks = direct_blocks + parsed.get("blocks", [])
-                    parsed["blocks"] = _dedup_chart_blocks(all_blocks)
-                return parsed
+            # condense: extract key numbers for Layer 2
+            if meta and meta.condense:
+                condensed = meta.condense(result)
+                # Convert dict condense result to text for LLM
+                if isinstance(condensed, dict):
+                    condensed_text = json.dumps(condensed, ensure_ascii=False, default=str)
+                else:
+                    condensed_text = str(condensed)
+                condense_texts.append(f"[{name}] {condensed_text}")
 
-            else:
-                # 重试后 AI 仍没调工具，直接返回 retry_msg 的内容
-                logger.info(f"[Chat] 重试后 AI 仍没调工具, content={retry_msg.content}")
-                return _parse_response(retry_msg.content)
+            # tool result: condense result feeds LLM (not full JSON)
+            tool_results.append({
+                "role": "tool", "tool_call_id": tc_id,
+                "content": condense_texts[-1] if condense_texts else "工具已执行。",
+            })
 
-        # ═══ 日志④：AI 直接返回 ═══
-        logger.info(f"[Chat] AI 直接返回, content长度={len(msg.content or '')}, 前50字: {(msg.content or '')[:50]}")
-        return _parse_response(msg.content)
+        if result is not None:
+            tool_cache[name] = result
 
-    except Exception as e:
-        logger.error(f"[Chat] 异常: {e}", exc_info=True)
-        return {"content": f"处理请求时出错，请重试。错误信息：{str(e)}", "blocks": []}
+    return direct_blocks, condense_texts, tool_results, tool_cache
 
+
+# ═══════════════════════════════════════════════════════════════
+# _dedup_chart_blocks — simplified dedup
+# ═══════════════════════════════════════════════════════════════
 
 def _dedup_chart_blocks(blocks: list) -> list:
     """去除重复的 chart block（相同 title 的图表只保留第一个）"""
@@ -581,172 +407,319 @@ def _dedup_chart_blocks(blocks: list) -> list:
     return result
 
 
+# ═══════════════════════════════════════════════════════════════
+# _parse_response — simplified: LLM outputs pure text now
+# ═══════════════════════════════════════════════════════════════
+
 def _parse_response(raw: str | None) -> dict:
-    """解析 LLM 返回的原始文本为 {content, blocks} 结构"""
+    """解析 LLM 返回的原始文本为 {content, blocks} 结构
 
-    def _extract_embedded_chart_json(result: dict) -> dict:
-        """从 content 中提取嵌入的 chart JSON 对象，移入 blocks 列表"""
-        import re
-        content = result.get("content", "")
-        if not content:
-            return result
-        blocks = result.get("blocks", [])
-        # Loop until no more chart JSON found in content
-        while True:
-            # Find pattern {"type":"chart" or {"type": "chart"
-            match = re.search(r'\{\s*"type"\s*:\s*"chart"', content)
-            if not match:
-                break
-            start = match.start()
-            # Brace-match to find the complete JSON object
-            depth = 0
-            in_string = False
-            escape_next = False
-            end = -1
-            for i in range(start, len(content)):
-                ch = content[i]
-                if escape_next:
-                    escape_next = False
-                    continue
-                if ch == "\\":
-                    escape_next = True
-                    continue
-                if ch == '"':
-                    in_string = not in_string
-                    continue
-                if in_string:
-                    continue
-                if ch == "{":
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                    if depth == 0:
-                        end = i + 1
-                        break
-            if end == -1:
-                # No matching close brace, stop
-                break
-            json_str = content[start:end]
-            try:
-                obj = json.loads(json_str)
-                if isinstance(obj, dict) and obj.get("type") == "chart" and "data" in obj:
-                    blocks.append({
-                        "type": "chart",
-                        "chartType": obj.get("chartType", "line"),
-                        "data": obj.get("data", {}),
-                    })
-                    # Remove the JSON fragment from content
-                    content = content[:start] + content[end:]
-                    # Clean up extra whitespace/newlines
-                    content = re.sub(r'\s{2,}', ' ', content).strip()
-                    continue
-            except json.JSONDecodeError:
-                pass
-            # If we got here, the match didn't produce a valid chart JSON; skip it
-            break
-
-        # If content is empty or only whitespace after extraction, set default message
-        if not content.strip():
-            content = "数据已生成，请查看下方图表/表格中的详细数据。"
-
-        result["content"] = content
-        result["blocks"] = blocks
-        return result
-
+    Since Layer 2 outputs pure text (no JSON), this is much simpler:
+    - If it looks like valid JSON with content/blocks, parse it (backward compat)
+    - Otherwise, treat the entire text as content
+    """
     if not raw:
-        return _extract_embedded_chart_json({"content": "数据已生成，请查看下方图表/表格中的详细数据。", "blocks": []})
+        return {"content": "数据已生成，请查看下方图表/表格中的详细数据。", "blocks": []}
+
     text = raw.strip()
 
-    def try_parse(t: str) -> dict | None:
-        try:
-            parsed = json.loads(t)
-        except json.JSONDecodeError:
-            return None
-        if isinstance(parsed, dict):
-            content = parsed.get("content", "")
-            blocks = parsed.get("blocks", [])
-            # If no content key at all, fallback to raw text
-            if "content" not in parsed:
-                content = raw
+    # Try JSON parse — for backward compat with models that still output JSON
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict) and ("content" in parsed or "blocks" in parsed):
             return {
-                "content": content,
-                "blocks": blocks,
+                "content": parsed.get("content", ""),
+                "blocks": parsed.get("blocks", []),
             }
-        # Bug 1.1: JSON array - convert to table block
-        if isinstance(parsed, list):
-            cols = []
-            if parsed and isinstance(parsed[0], dict):
-                cols = [{"key": k, "title": k} for k in parsed[0].keys()]
-            return {"content": f"查询到 {len(parsed)} 条数据，详情如下。", "blocks": [{"type": "table", "columns": cols, "rows": parsed}]}
-        if isinstance(parsed, (str, int, float, bool)) or parsed is None:
-            return {"content": str(parsed), "blocks": []}
-        # Fallback for any other type
-        return {"content": json.dumps(parsed, ensure_ascii=False), "blocks": []}
+        if isinstance(parsed, dict):
+            # Some other JSON dict — just use as content
+            return {"content": text, "blocks": []}
+    except json.JSONDecodeError:
+        pass
 
-    # Try direct parse
-    result = try_parse(text)
-    if result:
-        return _extract_embedded_chart_json(result)
+    # Pure text — the common case for Layer 2
+    return {"content": text, "blocks": []}
 
-    # Try stripping markdown code blocks: ```json ... ``` or ``` ... ```
+
+# ═══════════════════════════════════════════════════════════════
+# chat() — non-streaming, backward compatible
+# ═══════════════════════════════════════════════════════════════
+
+def _parse_dsml_tool_calls(text: str) -> list[dict] | None:
+    """从 LLM 文本中解析 DSML 格式的工具调用（DeepSeek 模型有时不用标准 function calling）
+
+    格式示例:
+        <｜｜DSML｜｜tool_calls>
+        <｜｜DSML｜｜invoke name="render_sales_trend">
+        <｜｜DSML｜｜parameter name="product_id" string="false">2</｜｜DSML｜｜parameter>
+        </｜｜DSML｜｜invoke>
+        </｜｜DSML｜｜tool_calls>
+    """
     import re
-    m = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
-    if m:
-        result = try_parse(m.group(1).strip())
-        if result:
-            return _extract_embedded_chart_json(result)
+    if "DSML" not in text:
+        return None
 
-    # Bug 1.5: Try ALL {...} candidates (last to first), prefer ones with content/blocks keys
-    candidates = []
-    pos = 0
-    while True:
-        start = text.find("{", pos)
-        if start == -1:
-            break
-        depth = 0
-        in_string = False
-        escape_next = False
-        for i in range(start, len(text)):
-            ch = text[i]
-            if escape_next:
-                escape_next = False
-                continue
-            if ch == "\\":
-                escape_next = True
-                continue
-            if ch == '"':
-                in_string = not in_string
-                continue
-            if in_string:
-                continue
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    candidates.append(text[start:i + 1])
-                    pos = i + 1
-                    break
-        else:
-            # No matching close brace found for this open brace
-            break
+    calls = []
+    # Find all invoke blocks
+    invoke_pattern = re.compile(r'<｜｜DSML｜｜invoke\s+name="([^"]+)">(.*?)</｜｜DSML｜｜invoke>', re.DOTALL)
+    param_pattern = re.compile(r'<｜｜DSML｜｜parameter\s+name="([^"]+)"[^>]*>(.*?)</｜｜DSML｜｜parameter>', re.DOTALL)
 
-    # Try candidates from last to first, preferring ones with content/blocks keys
-    best_result = None
-    for candidate in reversed(candidates):
-        result = try_parse(candidate)
-        if result:
-            # Check if this dict has content or blocks keys (preferred)
+    for m in invoke_pattern.finditer(text):
+        tool_name = m.group(1)
+        invoke_body = m.group(2)
+        args = {}
+        for pm in param_pattern.finditer(invoke_body):
+            key = pm.group(1)
+            val = pm.group(2).strip()
+            # Try to convert to appropriate type
             try:
-                parsed = json.loads(candidate)
-                if isinstance(parsed, dict) and ("content" in parsed or "blocks" in parsed):
-                    return _extract_embedded_chart_json(result)
-            except json.JSONDecodeError:
-                pass
-            # Keep first valid result as fallback
-            if best_result is None:
-                best_result = result
-    if best_result:
-        return _extract_embedded_chart_json(best_result)
+                args[key] = int(val)
+            except ValueError:
+                try:
+                    args[key] = float(val)
+                except ValueError:
+                    if val.lower() in ("true", "false"):
+                        args[key] = val.lower() == "true"
+                    else:
+                        args[key] = val
+        calls.append({"name": tool_name, "arguments": json.dumps(args, ensure_ascii=False)})
 
-    return _extract_embedded_chart_json({"content": raw, "blocks": []})
+    return calls if calls else None
+
+
+def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
+    """主对话函数 — 两层串联，返回 {"content": ..., "blocks": [...]}"""
+    if not client:
+        return {
+            "content": "AI 服务未配置，请在 .env 中设置 OPENAI_API_KEY。",
+            "blocks": [],
+        }
+
+    user_msg = messages[-1].get("content", "") if messages else ""
+    intent = classify_intent(user_msg)
+
+    full_messages = [{"role": "system", "content": ROUTING_PROMPT}] + messages
+    if intent.intent in ("data_query", "chart_only", "action"):
+        full_messages.insert(1, {"role": "system", "content": DATA_HINT})
+
+    try:
+        # Layer 1: routing — up to 3 rounds of tool calls
+        # (e.g. query_products → render_sales_trend needs 2 rounds)
+        MAX_L1_ROUNDS = 3
+        direct_blocks = []
+        condense_texts = []
+        tool_cache = {}
+
+        for round_idx in range(MAX_L1_ROUNDS):
+            resp = _call_llm_once(full_messages, tool_choice="auto", temperature=0.3)
+            msg = resp.choices[0].message
+
+            logger.info(f"[Chat] L1 round={round_idx+1} | model: {resp.model} | finish: {resp.choices[0].finish_reason} | token: {resp.usage}")
+            if msg.tool_calls:
+                logger.info(f"[Chat] L1 工具: {[tc.function.name for tc in msg.tool_calls]}")
+            else:
+                logger.info(f"[Chat] L1 直接回答, content长度={len(msg.content or '')}")
+
+            # No tool calls → either retry (round 0 only) or break
+            if not msg.tool_calls:
+                if round_idx == 0 and intent.intent in ("data_query", "chart_only", "action"):
+                    full_messages.append({"role": "system", "content": RETRY_HINT})
+                    retry = _call_llm_once(full_messages, tool_choice="auto", temperature=0.3)
+                    retry_msg = retry.choices[0].message
+                    if retry_msg.tool_calls:
+                        msg = retry_msg
+                        logger.info(f"[Chat] L1 重试成功, 工具: {[tc.function.name for tc in msg.tool_calls]}")
+                    else:
+                        logger.info(f"[Chat] L1 重试仍无工具调用")
+                        return _parse_response(retry_msg.content)
+                else:
+                    if round_idx == 0:
+                        return _parse_response(msg.content)
+                    break  # later rounds with no tool calls = L1 done
+
+            # Process tool calls from this round
+            assistant_msg = _build_assistant_msg(msg)
+            full_messages.append(assistant_msg)
+
+            round_blocks, round_condense, round_results, round_cache = _process_tool_calls(
+                msg.tool_calls, db, creator_id
+            )
+            full_messages.extend(round_results)
+
+            direct_blocks.extend(round_blocks)
+            condense_texts.extend(round_condense)
+            tool_cache.update(round_cache)
+
+            logger.info(f"[Chat] L1 round={round_idx+1} 工具执行完毕, blocks={len(round_blocks)}, condense={len(round_condense)}")
+
+            # If LLM called render_* tools, we have chart blocks — no need for more rounds
+            has_render = any(
+                (tc.function.name if hasattr(tc, "function") else tc.get("function", {}).get("name", "")).startswith("render_")
+                for tc in msg.tool_calls
+            )
+            if has_render:
+                logger.info(f"[Chat] L1 render工具已调用, 跳过后续轮次")
+                break
+
+        logger.info(f"[Chat] L1 完成, total direct_blocks={len(direct_blocks)}, total condense_texts={len(condense_texts)}")
+
+        # chart_only → skip Layer 2
+        if intent.intent == "chart_only":
+            content = _template_fallback(msg.tool_calls, tool_cache, db)
+            return {"content": content, "blocks": _dedup_chart_blocks(direct_blocks)}
+
+        # Layer 2: analysis (1 LLM call, pure text)
+        analysis_messages = full_messages.copy()
+        analysis_messages.append({"role": "system", "content": ANALYSIS_PROMPT})
+        if condense_texts:
+            analysis_messages.append({
+                "role": "system",
+                "content": "数据如下：\n" + "\n".join(condense_texts),
+            })
+        if direct_blocks:
+            analysis_messages.append({"role": "system", "content": ANALYSIS_HINT_RENDER})
+
+        try:
+            resp2 = client.chat.completions.create(
+                model=settings.OPENAI_MODEL,
+                messages=analysis_messages,
+                temperature=0.5,
+                max_tokens=1024,
+                extra_body={"thinking": {"type": "disabled"}},
+            )
+            raw_content = resp2.choices[0].message.content
+            logger.info(f"[Chat] L2 | token: {resp2.usage} | content长度={len(raw_content or '')}")
+
+            parsed = _parse_response(raw_content)
+        except Exception as e:
+            logger.error(f"[Chat] L2 异常: {e}", exc_info=True)
+            parsed = {"content": "", "blocks": []}
+
+        # Merge direct blocks
+        if direct_blocks:
+            all_blocks = direct_blocks + parsed.get("blocks", [])
+            parsed["blocks"] = _dedup_chart_blocks(all_blocks)
+
+        # Fallback: if LLM analysis empty but we have blocks
+        if not parsed.get("content", "").strip() and direct_blocks:
+            parsed["content"] = _template_fallback(msg.tool_calls, tool_cache, db)
+
+        return parsed
+
+    except Exception as e:
+        logger.error(f"[Chat] 异常: {e}", exc_info=True)
+        return {"content": f"处理请求时出错，请重试。错误信息：{str(e)}", "blocks": []}
+
+
+# ═══════════════════════════════════════════════════════════════
+# chat_stream() — streaming version
+# ═══════════════════════════════════════════════════════════════
+
+def chat_stream(messages: list[dict], db: Session, creator_id: int = 0):
+    """流式对话生成器 — 两层串联
+
+    Yields:
+        {"type": "blocks", "data": [...]}        — 确定性渲染块（图表/表格）
+        {"type": "content_delta", "text": "..."}  — 增量文本
+        {"type": "done", "data": {}}              — 结束标记
+    """
+    if not client:
+        yield {"type": "content_delta", "text": "AI 服务未配置。"}
+        yield {"type": "done", "data": {}}
+        return
+
+    user_msg = messages[-1].get("content", "") if messages else ""
+    intent = classify_intent(user_msg)
+
+    full_messages = [{"role": "system", "content": ROUTING_PROMPT}] + messages
+    if intent.intent in ("data_query", "chart_only", "action"):
+        full_messages.insert(1, {"role": "system", "content": DATA_HINT})
+
+    try:
+        # Layer 1: routing (1 LLM call)
+        resp = _call_llm_once(full_messages, tool_choice="auto", temperature=0.3)
+        msg = resp.choices[0].message
+
+        if not msg.tool_calls:
+            if intent.intent in ("data_query", "chart_only", "action"):
+                full_messages.append({"role": "system", "content": RETRY_HINT})
+                retry = _call_llm_once(full_messages, tool_choice="auto", temperature=0.3)
+                retry_msg = retry.choices[0].message
+                if retry_msg.tool_calls:
+                    yield from _handle_tool_calls_stream(retry_msg, full_messages, db, creator_id, intent)
+                    return
+                yield {"type": "content_delta", "text": retry_msg.content or ""}
+                yield {"type": "done", "data": {}}
+                return
+            yield {"type": "content_delta", "text": msg.content or ""}
+            yield {"type": "done", "data": {}}
+            return
+
+        yield from _handle_tool_calls_stream(msg, full_messages, db, creator_id, intent)
+
+    except Exception as e:
+        logger.error(f"[ChatStream] 异常: {e}", exc_info=True)
+        yield {"type": "content_delta", "text": f"处理请求时出错：{str(e)}"}
+        yield {"type": "done", "data": {}}
+
+
+def _handle_tool_calls_stream(msg, full_messages, db, creator_id, intent: IntentResult):
+    """流式处理工具调用 + Layer 2 分析"""
+    assistant_msg = _build_assistant_msg(msg)
+    full_messages.append(assistant_msg)
+
+    direct_blocks, condense_texts, tool_results, tool_cache = _process_tool_calls(
+        msg.tool_calls, db, creator_id
+    )
+    full_messages.extend(tool_results)
+
+    # Push blocks first (deterministic, before LLM text)
+    if direct_blocks:
+        yield {"type": "blocks", "data": _dedup_chart_blocks(direct_blocks)}
+
+    # chart_only → skip Layer 2
+    if intent.intent == "chart_only":
+        fallback = _template_fallback(msg.tool_calls, tool_cache, db)
+        yield {"type": "content_delta", "text": fallback}
+        yield {"type": "done", "data": {}}
+        return
+
+    # Layer 2: analysis (1 LLM call, pure text streaming)
+    analysis_messages = full_messages.copy()
+    analysis_messages.append({"role": "system", "content": ANALYSIS_PROMPT})
+    if condense_texts:
+        analysis_messages.append({
+            "role": "system",
+            "content": "数据如下：\n" + "\n".join(condense_texts),
+        })
+    if direct_blocks:
+        analysis_messages.append({"role": "system", "content": ANALYSIS_HINT_RENDER})
+
+    try:
+        stream = client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
+            messages=analysis_messages,
+            temperature=0.5,
+            max_tokens=1024,
+            stream=True,
+            extra_body={"thinking": {"type": "disabled"}},
+        )
+
+        collected = []
+        for chunk in stream:
+            delta = chunk.choices[0].delta
+            if delta.content:
+                collected.append(delta.content)
+                yield {"type": "content_delta", "text": delta.content}
+
+        # fallback: LLM analysis empty → rule template
+        if not "".join(collected).strip() and direct_blocks:
+            fallback = _template_fallback(msg.tool_calls, tool_cache, db)
+            yield {"type": "content_delta", "text": fallback}
+
+    except Exception:
+        if direct_blocks:
+            fallback = _template_fallback(msg.tool_calls, tool_cache, db)
+            yield {"type": "content_delta", "text": fallback}
+
+    yield {"type": "done", "data": {}}

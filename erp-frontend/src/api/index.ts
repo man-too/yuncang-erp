@@ -127,8 +127,26 @@ export const aiApi = {
   stockAlertBatch: (data: { product_ids: number[] }) => http.post('/ai/stock-alert-batch', data),
   /** AI 对话助手 */
   chat: (data: { messages: any[]; conversation_id: string }) => http.post('/ai/chat', data),
+  /** AI 对话 SSE 流式输出 */
+  chatStream: (data: { messages: any[]; conversation_id: string }) =>
+    fetch('/api/ai/chat/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+      },
+      body: JSON.stringify(data),
+    }),
   /** 快捷操作直接获取图表 blocks */
   quickChart: (type: string) => http.get('/ai/quick-chart', { params: { type } }),
+  /** 快捷操作 SSE 流式输出 */
+  quickChartStream: (type: string, recentQ?: string) => {
+    const params = new URLSearchParams({ type })
+    if (recentQ) params.set('recent_q', recentQ)
+    return fetch(`/api/ai/quick-chart-stream?${params.toString()}`, {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+    })
+  },
   execute: (data: { conversation_id: string; action: string; params: Record<string, any> }) =>
     http.post('/ai/execute', data),
   /** 库存 KPI */

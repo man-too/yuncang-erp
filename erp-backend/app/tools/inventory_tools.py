@@ -131,7 +131,7 @@ def _query_inventory(args: dict, db: Session) -> dict:
 
 
 def _analyze_stock_risk(args: dict, db: Session) -> dict:
-    from app.services.ai_service import analyze_stock_alert
+    from app.services.calculation_service import calc_reorder_point
 
     # Gather low-stock items
     q = db.query(Inventory, Product).join(Product, Inventory.product_id == Product.id)
@@ -141,16 +141,15 @@ def _analyze_stock_risk(args: dict, db: Session) -> dict:
 
     rows = q.limit(20).all()
 
-    # 批量查询所有相关产品的近30天销量（避免 N+1）
+    # Batch query recent 30-day sales for daily avg calculation
     product_ids = [prod.id for _, prod in rows]
     thirty_days_ago = date.today() - timedelta(days=30)
-    recent_sales_map: dict[int, list[dict]] = {}
+    daily_sales_map: dict[int, float] = {}
     if product_ids:
         sales_rows = (
             db.query(
                 SaleOrderItem.product_id,
-                SaleOrderItem.quantity,
-                SaleOrder.order_date,
+                func.sum(SaleOrderItem.quantity).label("total_qty"),
             )
             .join(SaleOrder, SaleOrder.id == SaleOrderItem.order_id)
             .filter(
@@ -158,35 +157,61 @@ def _analyze_stock_risk(args: dict, db: Session) -> dict:
                 SaleOrder.order_date >= thirty_days_ago,
                 SaleOrder.status != "cancelled",
             )
-            .order_by(SaleOrder.order_date.desc())
+            .group_by(SaleOrderItem.product_id)
             .all()
         )
-        for pid, qty, od in sales_rows:
-            if pid not in recent_sales_map:
-                recent_sales_map[pid] = []
-            recent_sales_map[pid].append({"date": str(od), "qty": float(qty or 0)})
+        for pid, total_qty in sales_rows:
+            daily_sales_map[pid] = float(total_qty or 0) / 30.0
 
     results = []
     for inv, prod in rows:
-        ai = analyze_stock_alert(
-            product_name=prod.name,
-            current_qty=float(inv.quantity),
-            min_stock=float(prod.min_stock),
-            max_stock=float(prod.max_stock),
-            recent_sales=recent_sales_map.get(prod.id, []),
-        )
+        current_qty = float(inv.quantity)
+        min_stock = float(prod.min_stock)
+        max_stock = float(prod.max_stock)
+        daily_sales = daily_sales_map.get(prod.id, 0)
+
+        # Deterministic ROP-based analysis (no LLM)
+        rop_result = calc_reorder_point(prod.id, db)
+        rop = rop_result.get("rop", min_stock)
+        safety_stock = rop_result.get("safety_stock", 0)
+
+        # Determine alert level based on ROP
+        if current_qty == 0:
+            alert_level = "critical"
+            suggested_action = "立即补货"
+            suggested_order_qty = max(int(rop), int(max_stock - current_qty))
+            reason = f"库存为零，ROP={rop:.1f}，需紧急补货"
+        elif current_qty < safety_stock:
+            alert_level = "critical"
+            suggested_order_qty = max(int(rop - current_qty), int(max_stock - current_qty))
+            suggested_action = "紧急补货"
+            reason = f"库存({current_qty})低于安全库存({safety_stock:.1f})，ROP={rop:.1f}"
+        elif current_qty <= rop:
+            alert_level = "warning"
+            suggested_order_qty = max(int(rop - current_qty), int(max_stock - current_qty))
+            suggested_action = "建议补货"
+            reason = f"库存({current_qty})接近再订货点({rop:.1f})，建议补充至最大库存"
+        else:
+            alert_level = "normal"
+            suggested_action = "维持现有库存"
+            suggested_order_qty = 0
+            reason = f"库存({current_qty})高于再订货点({rop:.1f})，库存充足"
+
+        # Confidence based on data availability
+        confidence = 0.9 if daily_sales > 0 else 0.5
+
         results.append({
             "product_id": prod.id,
             "product_name": prod.name,
             "warehouse_id": inv.warehouse_id,
             "warehouse_name": _warehouse_name(db, inv.warehouse_id),
-            "current_qty": float(inv.quantity),
-            "min_stock": float(prod.min_stock),
-            "alert_level": ai.get("alert_level", "warning") if ai else "warning",
-            "suggested_action": ai.get("suggested_action", "") if ai else "",
-            "suggested_order_qty": ai.get("suggested_order_qty", 0) if ai else 0,
-            "reason": ai.get("reason", "") if ai else "",
-            "confidence": ai.get("confidence", 0) if ai else 0,
+            "current_qty": current_qty,
+            "min_stock": min_stock,
+            "alert_level": alert_level,
+            "suggested_action": suggested_action,
+            "suggested_order_qty": suggested_order_qty,
+            "reason": reason,
+            "confidence": confidence,
         })
 
     # Sort by alert severity: critical first

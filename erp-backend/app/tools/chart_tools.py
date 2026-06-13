@@ -318,7 +318,129 @@ def _render_inventory_heatmap(db: Session) -> dict:
 # ── 2. Sales Trend ────────────────────────────────────────────────────
 
 def _render_sales_trend(args: dict, db: Session) -> dict:
-    """返回销售趋势折线图 chart block，支持按产品筛选"""
+    """返回销售趋势折线图 chart block，支持按产品筛选
+    - 无 product_id/product_name: 月度聚合概览（近6个月 + 预测）
+    - 有 product_id 或 product_name: 日级别折线图 + dataZoom + 预测7天
+    """
+    product_id = args.get("product_id")
+    product_name = args.get("product_name")
+
+    # product_name → product_id 解析
+    if not product_id and product_name:
+        prod = db.query(Product).filter(Product.name.ilike(f"%{product_name}%")).first()
+        if prod:
+            product_id = prod.id
+        else:
+            return {
+                "type": "table",
+                "columns": [{"key": "msg", "title": "提示"}],
+                "rows": [{"msg": f"未找到产品「{product_name}」，请确认产品名称是否正确"}],
+                "_render": True,
+            }
+
+    # ── 产品维度：日级别折线图 + dataZoom ──
+    if product_id:
+        prod = db.query(Product).filter(Product.id == product_id).first()
+        product_name = prod.name if prod else f"产品{product_id}"
+
+        ninety_days_ago = date.today() - timedelta(days=90)
+        date_fmt = func.date_format(SaleOrder.order_date, "%Y-%m-%d")
+
+        q = (
+            db.query(
+                date_fmt.label("day"),
+                func.sum(SaleOrderItem.quantity).label("qty"),
+            )
+            .join(SaleOrderItem, SaleOrderItem.order_id == SaleOrder.id)
+            .filter(SaleOrder.order_date >= ninety_days_ago, SaleOrder.status != "cancelled")
+            .filter(SaleOrderItem.product_id == product_id)
+        )
+        rows = q.group_by(date_fmt).order_by(date_fmt).all()
+
+        if not rows:
+            return {
+                "type": "table",
+                "columns": [{"key": "msg", "title": "提示"}],
+                "rows": [{"msg": f"{product_name} 暂无近90天销售数据"}],
+                "_render": True,
+            }
+
+        days = [r.day for r in rows]
+        qtys = [float(r.qty or 0) for r in rows]
+
+        # WMA prediction for next 7 days
+        wma_weights = [0.05, 0.08, 0.12, 0.15, 0.18, 0.22, 0.20]
+        last7 = qtys[-7:] if len(qtys) >= 7 else qtys
+        w = wma_weights[-len(last7):]
+        wma = sum(wi * v for wi, v in zip(w, last7)) / sum(w)
+        avg7 = sum(last7) / len(last7)
+        std7 = (sum((v - avg7) ** 2 for v in last7) / len(last7)) ** 0.5
+        volatility = std7 * 0.3
+        import math
+        pred_qtys = [max(0, round(wma + math.sin(i * 2.7 + 1.3) * volatility)) for i in range(7)]
+        pred_days = []
+        last_d = datetime.strptime(days[-1], "%Y-%m-%d")
+        for i in range(1, 8):
+            nd = last_d + timedelta(days=i)
+            pred_days.append(nd.strftime("%Y-%m-%d"))
+
+        x_data = days + pred_days
+        hist_series = qtys + [None] * 7
+        pred_series = [None] * len(qtys) + pred_qtys
+
+        return {
+            "type": "chart",
+            "chartType": "line",
+            "data": {
+                "title": {
+                    "text": f"{product_name} — 日销量趋势（近90天 + 预测7天）",
+                    "left": "center",
+                    "textStyle": {"fontSize": 14, "fontWeight": "bold"},
+                },
+                "tooltip": {
+                    "trigger": "axis",
+                    "axisPointer": {"type": "cross", "crossStyle": {"color": "#999"}},
+                },
+                "legend": {"data": ["历史销量", "预测销量"], "bottom": 0},
+                "dataZoom": [
+                    {"type": "inside", "start": 50, "end": 100},
+                    {"type": "slider", "start": 50, "end": 100, "height": 20, "bottom": 30},
+                ],
+                "grid": {"left": 60, "right": 30, "top": 50, "bottom": 80},
+                "xAxis": {
+                    "type": "category",
+                    "data": x_data,
+                    "axisLabel": {"fontSize": 11, "rotate": 30},
+                },
+                "yAxis": {"type": "value", "name": "销量", "nameTextStyle": {"fontSize": 12}},
+                "series": [
+                    {
+                        "name": "历史销量",
+                        "type": "line",
+                        "smooth": True,
+                        "data": hist_series,
+                        "showSymbol": False,
+                        "lineStyle": {"color": "#5470c6", "width": 2},
+                        "areaStyle": {"color": "rgba(84,112,198,0.10)"},
+                    },
+                    {
+                        "name": "预测销量",
+                        "type": "line",
+                        "smooth": True,
+                        "data": pred_series,
+                        "showSymbol": True,
+                        "symbol": "diamond",
+                        "symbolSize": 8,
+                        "lineStyle": {"color": "#fc8452", "width": 2, "type": "dashed"},
+                        "areaStyle": {"color": "rgba(252,132,82,0.1)"},
+                        "itemStyle": {"color": "#fc8452"},
+                    },
+                ],
+            },
+            "_render": True,
+        }
+
+    # ── 无产品维度：月度聚合概览 ──
     six_months_ago = date.today() - timedelta(days=180)
     date_fmt = func.date_format(SaleOrder.order_date, "%Y-%m")
 
@@ -331,17 +453,7 @@ def _render_sales_trend(args: dict, db: Session) -> dict:
         .join(SaleOrderItem, SaleOrderItem.order_id == SaleOrder.id)
         .filter(SaleOrder.order_date >= six_months_ago, SaleOrder.status != "cancelled")
     )
-    product_id = args.get("product_id")
-    if product_id:
-        q = q.filter(SaleOrderItem.product_id == product_id)
     rows = q.group_by(date_fmt).order_by(date_fmt).all()
-
-    # Get product name for title if filtered
-    product_name = None
-    if product_id:
-        prod = db.query(Product).filter(Product.id == product_id).first()
-        if prod:
-            product_name = prod.name
 
     if not rows:
         return {
@@ -377,7 +489,7 @@ def _render_sales_trend(args: dict, db: Session) -> dict:
         "chartType": "line",
         "data": {
             "title": {
-                "text": f"{'%s - ' % product_name if product_name else ''}月度销售趋势（近6个月 + 预测）",
+                "text": "月度销售趋势（近6个月 + 预测）",
                 "left": "center",
                 "textStyle": {"fontSize": 14, "fontWeight": "bold"},
             },
@@ -836,7 +948,7 @@ def _render_comprehensive_diagnosis(db: Session) -> dict:
         .scalar()
     ) or 0
     total_inventory_value = (
-        db.query(func.sum(Inventory.quantity * Product.unit_price))
+        db.query(func.sum(Inventory.quantity * Product.purchase_price))
         .join(Product, Inventory.product_id == Product.id)
         .filter(Inventory.quantity > 0)
         .scalar()
@@ -1007,7 +1119,7 @@ def _render_purchase_advice(db: Session) -> dict:
         rec["推荐供应商"] = best_supplier_name
         # Estimate purchase amount: suggested_qty * product unit_price
         product = db.query(Product).filter(Product.id == product_id).first()
-        unit_price = float(product.unit_price) if product and product.unit_price else 0
+        unit_price = float(product.purchase_price) if product and product.purchase_price else 0
         estimated_amount = round(rec.get("suggested_qty", 0) * unit_price, 2)
         rec["预估金额"] = estimated_amount
 

@@ -54,28 +54,78 @@ export const useChatStore = defineStore('chat', () => {
 
   async function sendMessage(content: string) {
     if (!content.trim() || isLoading.value) return
-
     addMessage({ role: 'user', content, blocks: [] })
 
-    const apiMessages = messages.value
-      .filter(m => m.role !== 'system')
-      .map(m => ({ role: m.role, content: m.content }))
-
+    const assistantMsg: ChatMessage = {
+      id: uuid(), role: 'assistant', content: '', blocks: [], timestamp: Date.now()
+    }
+    messages.value.push(assistantMsg)
     isLoading.value = true
+
     try {
-      const res: any = await aiApi.chat({
-        messages: apiMessages,
-        conversation_id: conversationId.value,
+      const apiMessages = messages.value
+        .filter(m => m.role !== 'system' && m.id !== assistantMsg.id)
+        .map(m => ({ role: m.role, content: m.content }))
+      const token = localStorage.getItem('token')
+      const res = await fetch('/api/ai/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ messages: apiMessages, conversation_id: conversationId.value }),
       })
-      conversationId.value = res.conversation_id || conversationId.value
-      addMessage({
-        role: 'assistant',
-        content: res.content || '数据已生成，请查看下方图表/表格。',
-        blocks: (res.blocks || []).map((b: any) => normalizeBlock(b)),
-      })
-    } catch (e: any) {
-      addMessage({ role: 'assistant', content: '抱歉，请求失败，请稍后重试。', blocks: [] })
-      ElMessage.error(e?.response?.data?.detail || '对话请求失败')
+      if (!res.ok || !res.body) {
+        throw new Error(`HTTP ${res.status}`)
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      const timeoutId = setTimeout(() => {
+        reader.cancel()
+        if (!assistantMsg.content) assistantMsg.content = '响应超时，请重试。'
+        isLoading.value = false
+      }, 30000)
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const events = buffer.split('\n\n')
+        buffer = events.pop() || ''
+        for (const eventStr of events) {
+          if (!eventStr.trim()) continue
+          const lines = eventStr.split('\n')
+          let eventType = '', eventData = ''
+          for (const line of lines) {
+            if (line.startsWith('event: ')) eventType = line.slice(7)
+            if (line.startsWith('data: ')) eventData = line.slice(6)
+          }
+          if (eventType === 'blocks') {
+            try {
+              const parsed = JSON.parse(eventData)
+              assistantMsg.blocks = (Array.isArray(parsed) ? parsed : []).map((b: any) => normalizeBlock(b))
+            } catch { /* ignore parse errors */ }
+          } else if (eventType === 'content_delta') {
+            // Backend JSON-encodes data; extract text
+            let text = eventData
+            try {
+              const parsed = JSON.parse(eventData)
+              if (typeof parsed === 'string') text = parsed
+              else if (typeof parsed === 'object' && parsed !== null) text = JSON.stringify(parsed)
+            } catch { /* not valid JSON, use raw text */ }
+            assistantMsg.content += text
+          } else if (eventType === 'done') {
+            clearTimeout(timeoutId)
+            try {
+              const doneData = JSON.parse(eventData)
+              if (doneData.conversation_id) conversationId.value = doneData.conversation_id
+            } catch { /* ignore */ }
+          }
+        }
+      }
+      clearTimeout(timeoutId)
+    } catch {
+      if (!assistantMsg.content) assistantMsg.content = '抱歉，请求失败，请稍后重试。'
     } finally {
       isLoading.value = false
     }
@@ -149,20 +199,35 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  /** 快捷操作：先拿确定性图表，再发给 LLM 做文字分析 */
+  /** 快捷操作：SSE 流式获取图表 + 模板分析 + LLM 深度分析 */
   async function sendQuickAction(type: string, content: string) {
     if (!content.trim() || isLoading.value) return
 
     addMessage({ role: 'user', content, blocks: [] })
     isLoading.value = true
 
+    // Create assistant message placeholder for streaming updates
+    const assistantId = uuid()
+    const assistantMsg: ChatMessage = {
+      id: assistantId,
+      role: 'assistant',
+      content: '',
+      blocks: [],
+      timestamp: Date.now(),
+    }
+    messages.value.push(assistantMsg)
+
     try {
-      // Step 1: Always fetch direct chart blocks from backend (100% deterministic)
+      // Try SSE streaming first
+      const streamOk = await _streamQuickAction(type, content, assistantId)
+      if (streamOk) return
+
+      // Fallback to non-streaming if SSE failed
       const quickResult = await fetchQuickActionBlocks(type)
       const directBlocks: MessageBlock[] = quickResult.blocks
       const fallbackContent: string = quickResult.content || ''
 
-      // Step 2: Ask LLM for text analysis only (charts already displayed)
+      // Ask LLM for text analysis
       let llmContent = ''
       let llmBlocks: MessageBlock[] = []
       try {
@@ -170,7 +235,6 @@ export const useChatStore = defineStore('chat', () => {
           .filter(m => m.role !== 'system')
           .map(m => ({ role: m.role, content: m.content }))
 
-        // Append a system hint so LLM doesn't generate duplicate charts
         apiMessages.push({
           role: 'system',
           content: directBlocks.length > 0
@@ -186,25 +250,135 @@ export const useChatStore = defineStore('chat', () => {
         llmContent = res.content || ''
         llmBlocks = (res.blocks || []).map((b: any) => normalizeBlock(b))
       } catch {
-        if (directBlocks.length > 0) {
-          llmContent = ''
-        } else {
+        if (directBlocks.length === 0) {
           llmContent = '抱歉，请求失败，请稍后重试。'
         }
       }
 
-      // Step 3: Merge — directBlocks first (charts), llmBlocks has action buttons etc.
-      // Use LLM content if available, otherwise fallback to backend-generated analysis
       const finalContent = llmContent || fallbackContent || '数据已加载，请查看下方图表/表格。'
-      addMessage({
-        role: 'assistant',
-        content: finalContent,
-        blocks: [...directBlocks, ...llmBlocks],
-      })
+      // Update the assistant message
+      const msg = messages.value.find(m => m.id === assistantId)
+      if (msg) {
+        msg.content = finalContent
+        msg.blocks = [...directBlocks, ...llmBlocks]
+      }
     } catch {
-      addMessage({ role: 'assistant', content: '抱歉，请求失败，请稍后重试。', blocks: [] })
+      const msg = messages.value.find(m => m.id === assistantId)
+      if (msg) {
+        msg.content = '抱歉，请求失败，请稍后重试。'
+        msg.blocks = []
+      }
     } finally {
       isLoading.value = false
+    }
+  }
+
+  /** SSE 流式读取快捷操作，返回 true 表示成功 */
+  async function _streamQuickAction(type: string, recentQ: string, assistantId: string): Promise<boolean> {
+    try {
+      const response = await aiApi.quickChartStream(type, recentQ)
+      if (!response.ok) return false
+      if (!response.body) return false
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let gotBlocks = false
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+
+        // Parse SSE events from buffer
+        const lines = buffer.split('\n')
+        // Keep the last incomplete line in buffer
+        buffer = lines.pop() || ''
+
+        let currentEvent = ''
+        let currentData = ''
+
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7).trim()
+          } else if (line.startsWith('data: ')) {
+            currentData = line.slice(6)
+          } else if (line === '' && currentEvent) {
+            // Empty line = end of event
+            const msg = messages.value.find(m => m.id === assistantId)
+            if (!msg) continue
+
+            if (currentEvent === 'blocks') {
+              try {
+                const blocks = JSON.parse(currentData)
+                if (Array.isArray(blocks)) {
+                  msg.blocks = blocks.map((b: any) => normalizeBlock(b))
+                  gotBlocks = true
+                }
+              } catch { /* ignore parse error */ }
+            } else if (currentEvent === 'content_delta') {
+              // Backend always JSON-encodes the data field
+              let text = currentData
+              try {
+                const parsed = JSON.parse(currentData)
+                if (typeof parsed === 'string') text = parsed
+                else if (typeof parsed === 'object' && parsed !== null) text = JSON.stringify(parsed)
+              } catch { /* not valid JSON, use raw text */ }
+              msg.content += text
+            } else if (currentEvent === 'done') {
+              // Stream complete
+            }
+
+            currentEvent = ''
+            currentData = ''
+          }
+        }
+
+        // Process any remaining complete event in buffer
+        if (buffer.includes('\n\n')) {
+          // Re-process next iteration
+        }
+      }
+
+      // Process any remaining data in buffer
+      if (buffer.trim()) {
+        const remainingLines = buffer.split('\n')
+        let evt = ''
+        let dat = ''
+        for (const line of remainingLines) {
+          if (line.startsWith('event: ')) evt = line.slice(7).trim()
+          else if (line.startsWith('data: ')) dat = line.slice(6)
+        }
+        if (evt && dat) {
+          const msg = messages.value.find(m => m.id === assistantId)
+          if (msg) {
+            if (evt === 'blocks') {
+              try {
+                const blocks = JSON.parse(dat)
+                if (Array.isArray(blocks)) {
+                  msg.blocks = blocks.map((b: any) => normalizeBlock(b))
+                  gotBlocks = true
+                }
+              } catch { /* ignore */ }
+            } else if (evt === 'content_delta') {
+              let text = dat
+              try {
+                const parsed = JSON.parse(dat)
+                if (typeof parsed === 'string') text = parsed
+                else if (typeof parsed === 'object' && parsed !== null) text = JSON.stringify(parsed)
+              } catch { /* not valid JSON */ }
+              msg.content += text
+            }
+          }
+        }
+      }
+
+      // If we got at least blocks, consider it a success
+      return gotBlocks || messages.value.find(m => m.id === assistantId)?.content !== ''
+    } catch (e) {
+      console.warn('SSE streaming failed, falling back to non-streaming:', e)
+      return false
     }
   }
 

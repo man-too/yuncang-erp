@@ -7,8 +7,12 @@
       <el-button v-if="viewMode === 'product'" type="default" size="small" @click="backToAggregate">
         <el-icon style="margin-right: 4px;"><ArrowLeft /></el-icon>返回总览
       </el-button>
-      <el-date-picker v-if="viewMode === 'product'" v-model="dateRange" type="daterange" range-separator="至" start-placeholder="开始" end-placeholder="结束" size="small" style="width: 220px;" />
-      <el-button v-if="viewMode === 'product'" type="primary" size="small" @click="loadProductData">分析</el-button>
+      <!-- 时间范围切换（产品模式 + 历史视图时显示） -->
+      <div v-if="viewMode === 'product' && activeView === 'history'" style="display: flex; gap: 4px; margin-left: 4px;">
+        <div class="time-tab" :class="{ active: timeRange === '7d' }" @click="setTimeRange('7d')">近7天</div>
+        <div class="time-tab" :class="{ active: timeRange === '30d' }" @click="setTimeRange('30d')">近30天</div>
+        <div class="time-tab" :class="{ active: timeRange === '3m' }" @click="setTimeRange('3m')">近3个月</div>
+      </div>
     </div>
 
     <div v-loading="loading" style="height: 360px; margin-bottom: 12px;">
@@ -37,7 +41,7 @@
       </div>
       <div class="toggle-btn" :class="{ active: activeView === 'forecast' }" @click="activeView = 'forecast'">
         <el-icon class="toggle-icon"><DataAnalysis /></el-icon>
-        <span class="toggle-label">预测销量（LLM）</span>
+        <span class="toggle-label">预测销量</span>
       </div>
     </div>
 
@@ -48,7 +52,7 @@
         <div v-if="aiResult.trend" style="margin-top: 6px;">
           <el-tag :type="aiResult.trend === '上升' ? 'danger' : aiResult.trend === '下降' ? 'success' : 'info'" size="small">趋势: {{ aiResult.trend }}</el-tag>
         </div>
-        <div v-if="aiResult.forecast_next_30d" style="margin-top: 6px;">预测未来30天销量: <b>{{ aiResult.forecast_next_30d }}</b></div>
+        <div v-if="aiResult.forecast_next_7d" style="margin-top: 6px;">预测未来7天销量: <b>{{ aiResult.forecast_next_7d }}</b></div>
         <div v-if="aiResult.confidence" class="ai-confidence">
           置信度: <el-progress :percentage="Math.round(aiResult.confidence * 100)" :stroke-width="8" style="width: 120px; display: inline-block; margin-left: 6px;" />
         </div>
@@ -75,6 +79,7 @@ const loading = ref(false)
 const aiResult = ref<any>(null)
 const dateRange = ref<any>(null)
 const activeView = ref<'history' | 'forecast'>('history')
+const timeRange = ref<'7d' | '30d' | '3m'>('30d')
 
 // View mode: aggregate or product
 const viewMode = ref<'aggregate' | 'product'>('aggregate')
@@ -119,17 +124,51 @@ function calculateWMA(data: number[], days = 7): number {
 }
 
 function computePrediction(history: number[]): number[] {
-  if (history.length < 3) return Array.from({ length: 30 }, () => 0)
+  if (history.length < 3) return Array.from({ length: 7 }, () => 0)
   const wma = calculateWMA(history)
   // Compute micro-volatility from last 7 days
   const last7 = history.slice(-7)
   const avg = last7.reduce((s, v) => s + v, 0) / last7.length
   const stdDev = Math.sqrt(last7.reduce((s, v) => s + (v - avg) ** 2, 0) / 7)
   const volatility = stdDev * 0.3
-  return Array.from({ length: 30 }, (_, i) => {
+  return Array.from({ length: 7 }, (_, i) => {
     const noise = Math.sin(i * 2.7 + 1.3) * volatility
     return Math.max(0, Math.round(wma + noise))
   })
+}
+
+function aggregateWeekly(dailyData: any[]): any[] {
+  if (dailyData.length === 0) return []
+  const weeks: any[] = []
+  let currentWeek: any[] = []
+  let weekStart = ''
+
+  for (const d of dailyData) {
+    const date = new Date(d.date)
+    const dayOfWeek = date.getDay() // 0=Sun
+    if (dayOfWeek === 1 && currentWeek.length > 0) {
+      // Start of new week (Monday), push previous week
+      const totalQty = currentWeek.reduce((s: number, x: any) => s + (x.total_qty || 0), 0)
+      weeks.push({
+        date: weekStart,
+        dateLabel: `${weekStart.slice(5)}~${currentWeek[currentWeek.length-1].date.slice(5)}`,
+        total_qty: totalQty
+      })
+      currentWeek = []
+    }
+    if (currentWeek.length === 0) weekStart = d.date
+    currentWeek.push(d)
+  }
+  // Last partial week
+  if (currentWeek.length > 0) {
+    const totalQty = currentWeek.reduce((s: number, x: any) => s + (x.total_qty || 0), 0)
+    weeks.push({
+      date: weekStart,
+      dateLabel: `${weekStart.slice(5)}~${currentWeek[currentWeek.length-1].date.slice(5)}`,
+      total_qty: totalQty
+    })
+  }
+  return weeks
 }
 
 const chartOption = computed(() => {
@@ -232,14 +271,66 @@ const chartOption = computed(() => {
   }
 
   // History view (product mode)
+  const range = timeRange.value
+
+  if (range === '3m') {
+    // Aggregate daily data into weekly buckets
+    const weeklyData = aggregateWeekly(productDailyData.value)
+    const dates = weeklyData.map((d: any) => d.dateLabel)
+    const values = weeklyData.map((d: any) => d.total_qty || 0)
+    return {
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(84,112,198,0.06)' } },
+        formatter: (params: any) => {
+          const p = params[0]
+          return `${p.axisValue}<br/>${p.marker} 周销量: ${p.value}`
+        },
+      },
+      grid: { left: 60, right: 30, top: 30, bottom: 45 },
+      xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 11, rotate: 30 } },
+      yAxis: { type: 'value', name: '周销量' },
+      dataZoom: [
+        { type: 'inside', start: 0, end: 100 },
+        { type: 'slider', start: 0, end: 100, height: 20, bottom: 5 },
+      ],
+      series: [{
+        name: '周销量', type: 'line', smooth: true, data: values, showSymbol: true, symbol: 'circle', symbolSize: 7,
+        lineStyle: { color: '#005BF5', width: 2.5 }, areaStyle: { color: 'rgba(0,91,245,0.12)' },
+        emphasis: { scale: 1.8 },
+      }],
+    }
+  }
+
+  if (range === '7d') {
+    const dates = productDailyData.value.map((d: any) => d.date)
+    const values = productDailyData.value.map((d: any) => d.total_qty || 0)
+    return {
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(84,112,198,0.06)' } } },
+      grid: { left: 60, right: 30, top: 30, bottom: 20 },
+      xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 11 } },
+      yAxis: { type: 'value', name: '销量' },
+      series: [{
+        name: '历史销量', type: 'line', smooth: true, data: values, showSymbol: true, symbol: 'circle', symbolSize: 8,
+        lineStyle: { color: '#005BF5', width: 2.5 }, areaStyle: { color: 'rgba(0,91,245,0.12)' },
+        label: { show: true, position: 'top', fontSize: 11, fontWeight: 600 },
+        emphasis: { scale: 1.8 },
+      }],
+    }
+  }
+
+  // 30d default
   const dates = productDailyData.value.map((d: any) => d.date)
   const values = productDailyData.value.map((d: any) => d.total_qty || 0)
   return {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(84,112,198,0.06)' } } },
-    grid: { left: 60, right: 30, top: 30, bottom: 20 },
+    grid: { left: 60, right: 30, top: 30, bottom: 45 },
     xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 11 } },
     yAxis: { type: 'value', name: '销量' },
-    dataZoom: [{ type: 'inside', start: 0, end: 100 }],
+    dataZoom: [
+      { type: 'inside', start: 0, end: 100 },
+      { type: 'slider', start: 0, end: 100, height: 20, bottom: 5 },
+    ],
     series: [{
       name: '历史销量', type: 'line', smooth: true, data: values, showSymbol: true, symbol: 'circle', symbolSize: 7,
       lineStyle: { color: '#005BF5', width: 2.5 }, areaStyle: { color: 'rgba(0,91,245,0.12)' },
@@ -275,10 +366,13 @@ const loadProductData = async () => {
   viewMode.value = 'product'
   activeView.value = 'history'
   try {
+    const daysMap = { '7d': 7, '30d': 30, '3m': 90 }
     const params: any = { product_id: filterProductId.value }
     if (dateRange.value) {
       const diff = Math.ceil((dateRange.value[1] - dateRange.value[0]) / (1000 * 60 * 60 * 24))
       params.days = diff
+    } else {
+      params.days = daysMap[timeRange.value] || 30
     }
     productDailyData.value = (await aiApi.salesHistory(params) as any) || []
 
@@ -293,17 +387,18 @@ const loadProductData = async () => {
         } else {
           aiResult.value = { summary: pred.summary || '', confidence: pred.confidence || 0 }
         }
-        // Use LLM prediction data for chart
+        // Use LLM prediction data for chart (only 7 days)
         if (parsed && parsed.predictions && parsed.predictions.length > 0) {
-          predictions.value = parsed.predictions
+          predictions.value = parsed.predictions.slice(0, 7)
           const lastDate = productDailyData.value.length > 0 ? productDailyData.value[productDailyData.value.length - 1].date : null
-          predictionDates.value = parsed.prediction_dates || getFutureDates(lastDate, parsed.predictions.length)
+          const allDates = parsed.prediction_dates || getFutureDates(lastDate, parsed.predictions.length)
+          predictionDates.value = allDates.slice(0, 7)
         } else {
           // WMA fallback
           const fullValues = productDailyData.value.map((d: any) => d.total_qty || 0)
           predictions.value = computePrediction(fullValues)
           const lastDate = productDailyData.value.length > 0 ? productDailyData.value[productDailyData.value.length - 1].date : null
-          predictionDates.value = getFutureDates(lastDate, 30)
+          predictionDates.value = getFutureDates(lastDate, 7)
         }
       }
     } catch {
@@ -311,7 +406,7 @@ const loadProductData = async () => {
       const fullValues = productDailyData.value.map((d: any) => d.total_qty || 0)
       predictions.value = computePrediction(fullValues)
       const lastDate = productDailyData.value.length > 0 ? productDailyData.value[productDailyData.value.length - 1].date : null
-      predictionDates.value = getFutureDates(lastDate, 30)
+      predictionDates.value = getFutureDates(lastDate, 7)
       aiResult.value = { summary: `基于 ${productDailyData.value.length} 天数据完成分析`, trend: '平稳', confidence: 0.6 }
     }
   } finally { loading.value = false }
@@ -323,6 +418,13 @@ const onProductSelect = (val: number | null) => {
     loadProductData()
   } else {
     backToAggregate()
+  }
+}
+
+async function setTimeRange(range: '7d' | '30d' | '3m') {
+  timeRange.value = range
+  if (filterProductId.value) {
+    await loadProductData()
   }
 }
 
@@ -377,4 +479,7 @@ onMounted(async () => {
 .top-name { flex: 1; font-size: 13px; font-weight: 500; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .top-qty { font-size: 12px; color: #666; }
 .top-amount { font-size: 12px; color: var(--color-primary); font-weight: 600; }
+.time-tab { padding: 4px 14px; border-radius: 6px; font-size: 12px; color: #666; cursor: pointer; border: 1px solid #ddd; transition: all 0.2s; user-select: none; background: #fff; }
+.time-tab:hover { border-color: #409eff; color: #409eff; }
+.time-tab.active { background: #409eff; color: #fff; border-color: #409eff; }
 </style>

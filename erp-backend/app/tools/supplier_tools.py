@@ -95,47 +95,68 @@ def _query_suppliers(args: dict, db: Session) -> dict:
 
 
 def _rank_suppliers(args: dict, db: Session) -> dict:
-    from app.services.ai_service import supplier_ranking_ai
+    from app.services.supplier_scoring import calc_supplier_score
 
-    # Gather all active suppliers with evaluation data
-    suppliers = db.query(Supplier).filter(Supplier.status == "active").all()
-    data = []
-    for s in suppliers:
-        evals = db.query(
-            func.avg(SupplierEvaluation.quality_score).label("q"),
-            func.avg(SupplierEvaluation.delivery_score).label("d"),
-            func.avg(SupplierEvaluation.price_score).label("p"),
-            func.avg(SupplierEvaluation.service_score).label("s"),
-            func.avg(SupplierEvaluation.total_score).label("total_label"),
-        ).filter(SupplierEvaluation.supplier_id == s.id).first()
+    # Use deterministic supplier scoring (no LLM)
+    scores = calc_supplier_score(supplier_id=None, db=db)
 
-        total_orders = db.query(PurchaseOrder).filter(
-            PurchaseOrder.supplier_id == s.id
-        ).count()
-        completed_orders = db.query(PurchaseOrder).filter(
-            PurchaseOrder.supplier_id == s.id,
-            PurchaseOrder.status == "completed",
-        ).count()
-        delivery_rate = round(completed_orders / total_orders * 100, 1) if total_orders > 0 else 0
+    # Handle both single (error) and list results
+    if isinstance(scores, dict) and "error" in scores:
+        return {"rankings": [], "summary": scores["error"], "confidence": 0, "supplier_data": []}
 
-        data.append({
-            "supplier_id": s.id, "supplier_name": s.name,
-            "quality_score": round(float(evals.q or 0), 1),
-            "delivery_score": round(float(evals.d or 0), 1),
-            "price_score": round(float(evals.p or 0), 1),
-            "service_score": round(float(evals.s or 0), 1),
-            "total_score": round(float(evals.total_label or 0), 1),
-            "delivery_rate": delivery_rate,
-            "lead_time_days": s.delivery_lead_time,
+    # Build rankings from calc_supplier_score results
+    rankings = []
+    supplier_data = []
+    for s in scores:
+        ranking_entry = {
+            "supplier_id": s["supplier_id"],
+            "supplier_name": s["supplier_name"],
+            "ai_score": s["total_score"],
+            "total_score": s["total_score"],
+            "strengths": "",
+            "weaknesses": "",
+            "suggestion": s.get("suggested_share", ""),
+        }
+        # Add strengths/weaknesses based on score breakdown
+        if s["quality"] >= 80:
+            ranking_entry["strengths"] += "质量优异 "
+        elif s["quality"] < 60:
+            ranking_entry["weaknesses"] += "质量偏低 "
+        if s["delivery"] >= 80:
+            ranking_entry["strengths"] += "交付可靠 "
+        elif s["delivery"] < 60:
+            ranking_entry["weaknesses"] += "交付不稳 "
+        if s["price"] >= 80:
+            ranking_entry["strengths"] += "价格优势 "
+        elif s["price"] < 60:
+            ranking_entry["weaknesses"] += "价格偏高 "
+        if s.get("is_single_source"):
+            ranking_entry["weaknesses"] += "单源依赖风险 "
+        if s.get("risk_penalty", 0) > 0:
+            ranking_entry["weaknesses"] += f"风险罚分{s['risk_penalty']:.1f} "
+
+        rankings.append(ranking_entry)
+        supplier_data.append({
+            "supplier_id": s["supplier_id"],
+            "supplier_name": s["supplier_name"],
+            "quality_score": s["quality"],
+            "delivery_score": s["delivery"],
+            "price_score": s["price"],
+            "service_score": s["service"],
+            "total_score": s["total_score"],
+            "lead_time_days": 0,  # not in scoring output
         })
 
-    ai = supplier_ranking_ai(data)
-    if ai is None:
-        ai = {}
+    # Generate summary
+    if rankings:
+        top = rankings[0]
+        summary = f"共评估 {len(rankings)} 家供应商，推荐 {top['supplier_name']}（综合评分 {top['total_score']:.1f}）"
+    else:
+        summary = "暂无活跃供应商数据"
 
     return {
-        "rankings": ai.get("rankings", []),
-        "summary": ai.get("summary", ""),
-        "confidence": ai.get("confidence", 0),
-        "supplier_data": data,
+        "rankings": rankings,
+        "summary": summary,
+        "confidence": 0.9,
+        "supplier_data": supplier_data,
     }

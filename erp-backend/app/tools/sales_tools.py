@@ -100,7 +100,7 @@ def _wma_fallback(history: list[dict], days: int = 30, product_name: str | None 
 
 
 def _forecast_sales(args: dict, db: Session) -> dict:
-    from app.services.ai_service import sales_forecast
+    """WMA-based sales forecast (deterministic, no LLM)"""
 
     prod = db.query(Product).filter(Product.id == args["product_id"]).first()
     if not prod:
@@ -119,31 +119,39 @@ def _forecast_sales(args: dict, db: Session) -> dict:
     )
     history = [{"date": str(r[0]), "quantity": float(r[1] or 0)} for r in rows]
 
-    ai = sales_forecast(product_name=prod.name, history_sales=history)
+    # Use WMA fallback as the deterministic prediction method
+    predictions = _wma_fallback(history, 30, product_name=prod.name)
 
-    # Determine predictions: AI first, WMA fallback
-    predictions = []
-    if ai and ai.get("predictions"):
-        predictions = ai["predictions"]
+    # Determine trend from recent data
+    if len(history) >= 14:
+        recent_qty = sum(h["quantity"] for h in history[-7:])
+        earlier_qty = sum(h["quantity"] for h in history[:7])
+        if earlier_qty > 0:
+            change_pct = (recent_qty - earlier_qty) / earlier_qty * 100
+            if change_pct > 10:
+                trend = "上升"
+            elif change_pct < -10:
+                trend = "下降"
+            else:
+                trend = "平稳"
+        else:
+            trend = "数据不足"
     else:
-        predictions = _wma_fallback(history, 30, product_name=prod.name)
+        trend = "数据不足"
 
     # Generate prediction dates
     last_date = rows[-1][0] if rows else date.today()
     prediction_dates = [(last_date + timedelta(days=i + 1)).strftime("%Y-%m-%d") for i in range(len(predictions))]
 
-    if ai is None:
-        ai = {}
-
     return {
         "product_id": prod.id,
         "product_name": prod.name,
         "history": history[-30:],
-        "forecast_next_30d": ai.get("forecast_next_30d", sum(predictions) if predictions else 0),
+        "forecast_next_30d": sum(predictions) if predictions else 0,
         "predictions": predictions,
         "prediction_dates": prediction_dates,
-        "trend": ai.get("trend", "未知"),
-        "seasonal_factor": ai.get("seasonal_factor", ""),
-        "suggestion": ai.get("suggestion", ""),
-        "confidence": ai.get("confidence", 0),
+        "trend": trend,
+        "seasonal_factor": "",
+        "suggestion": f"基于WMA预测未来30天需求约{sum(predictions)}件，趋势{trend}",
+        "confidence": 0.85 if len(history) >= 14 else 0.5,
     }

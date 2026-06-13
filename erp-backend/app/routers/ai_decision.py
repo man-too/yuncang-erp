@@ -16,12 +16,6 @@ from app.models.purchase import PurchaseOrder, PurchaseOrderItem
 from app.models.inventory import Inventory
 from app.models.sale import SaleOrder, SaleOrderItem
 from app.models.ai_analysis import AIDecisionRecord
-from app.services.ai_service import (
-    analyze_stock_alert,
-    sales_forecast,
-    recommend_supplier,
-    supplier_ranking_ai,
-)
 from app.routers.auth import get_current_user
 from app.models.user import User
 
@@ -47,6 +41,68 @@ def save_decision(db: Session, decision_type: str, title: str,
     db.commit()
     db.refresh(record)
     return record
+
+
+def _deterministic_stock_alert(product_name: str, current_qty: float,
+                                min_stock: float, max_stock: float,
+                                recent_sales: list[dict], product_id: int = 0,
+                                db: Session = None) -> dict:
+    """Deterministic stock alert analysis using ROP (no LLM)"""
+    from app.services.calculation_service import calc_reorder_point
+
+    # Calculate daily sales rate
+    daily_sales = 0.0
+    if recent_sales:
+        total_qty = sum(s.get("qty", 0) for s in recent_sales)
+        daily_sales = total_qty / 30.0
+
+    # Get ROP if db is available
+    rop = min_stock
+    safety_stock = 0.0
+    if db and product_id:
+        try:
+            rop_result = calc_reorder_point(product_id, db)
+            rop = rop_result.get("rop", min_stock)
+            safety_stock = rop_result.get("safety_stock", 0)
+        except Exception:
+            pass
+
+    # Determine alert level
+    if current_qty == 0:
+        alert_level = "critical"
+        suggested_action = "立即补货"
+        suggested_order_qty = max(int(rop), int(max_stock))
+        reason = f"库存为零，ROP={rop:.1f}，需紧急补货"
+    elif safety_stock > 0 and current_qty < safety_stock:
+        alert_level = "critical"
+        suggested_order_qty = max(int(rop - current_qty), int(max_stock - current_qty))
+        suggested_action = "紧急补货"
+        reason = f"库存({current_qty})低于安全库存({safety_stock:.1f})，ROP={rop:.1f}"
+    elif current_qty <= rop:
+        alert_level = "warning"
+        suggested_order_qty = max(int(rop - current_qty), int(max_stock - current_qty))
+        suggested_action = "建议补货"
+        reason = f"库存({current_qty})接近再订货点({rop:.1f})，建议补充至最大库存"
+    elif current_qty <= min_stock:
+        alert_level = "warning"
+        suggested_order_qty = int(max_stock - current_qty)
+        suggested_action = "建议补货"
+        reason = f"库存({current_qty})低于最低库存线({min_stock})，建议补充"
+    else:
+        alert_level = "normal"
+        suggested_action = "维持现有库存"
+        suggested_order_qty = 0
+        reason = f"库存({current_qty})高于再订货点({rop:.1f})，库存充足"
+
+    confidence = 0.9 if daily_sales > 0 else 0.5
+
+    return {
+        "alert_level": alert_level,
+        "suggested_action": suggested_action,
+        "suggested_order_qty": suggested_order_qty,
+        "reason": reason,
+        "confidence": confidence,
+    }
 
 
 @router.post("/stock-alert")
@@ -78,15 +134,15 @@ def ai_stock_alert(
         for soi, order_date in recent_sales
     ]
 
-    result = analyze_stock_alert(
+    result = _deterministic_stock_alert(
         product_name=product.name,
         current_qty=current_qty,
         min_stock=product.min_stock,
         max_stock=product.max_stock,
         recent_sales=sales_data,
+        product_id=product_id,
+        db=db,
     )
-    if result and result.get("status") == "error":
-        raise HTTPException(status_code=503, detail=result.get("error", "AI 服务不可用"))
 
     record = save_decision(
         db, "stock_alert",
@@ -150,32 +206,24 @@ def ai_stock_alert_batch(
                 for soi, order_date in recent_sales
             ]
 
-            result = analyze_stock_alert(
+            result = _deterministic_stock_alert(
                 product_name=product.name,
                 current_qty=current_qty,
                 min_stock=product.min_stock,
                 max_stock=product.max_stock,
                 recent_sales=sales_data,
+                product_id=product_id,
+                db=db,
             )
 
-            if result and result.get("status") == "error":
-                results.append({
-                    "product_id": product_id,
-                    "product_name": product.name,
-                    "current_qty": current_qty,
-                    "risk_level": "unknown",
-                    "suggestion": result.get("error", "AI 服务不可用"),
-                    "ai_analysis": None,
-                })
-            else:
-                results.append({
-                    "product_id": product_id,
-                    "product_name": product.name,
-                    "current_qty": current_qty,
-                    "risk_level": result.get("alert_level", "unknown") if result else "unknown",
-                    "suggestion": result.get("suggestion", "") if result else "",
-                    "ai_analysis": result,
-                })
+            results.append({
+                "product_id": product_id,
+                "product_name": product.name,
+                "current_qty": current_qty,
+                "risk_level": result.get("alert_level", "unknown"),
+                "suggestion": result.get("suggested_action", ""),
+                "ai_analysis": result,
+            })
         except Exception:
             results.append({
                 "product_id": product_id,
@@ -193,28 +241,32 @@ def ai_supplier_recommend(
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    """AI 供应商推荐"""
+    """供应商推荐（基于确定性评分算法）"""
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="产品不存在")
 
-    suppliers = db.query(Supplier).filter(Supplier.status == "active").all()
-    supplier_data = [
-        {
-            "id": s.id,
-            "name": s.name,
-            "rating": s.rating,
-            "delivery_lead_time": s.delivery_lead_time,
-        }
-        for s in suppliers
-    ]
+    from app.services.supplier_scoring import calc_supplier_score
+    scores = calc_supplier_score(supplier_id=None, db=db)
+    if isinstance(scores, dict) and "error" in scores:
+        raise HTTPException(status_code=503, detail=scores.get("error", "供应商评分服务不可用"))
 
-    result = recommend_supplier(
-        [{"id": product.id, "name": product.name, "price": product.purchase_price}],
-        supplier_data,
-    )
-    if result and result.get("status") == "error":
-        raise HTTPException(status_code=503, detail=result.get("error", "AI 服务不可用"))
+    # Build recommendations from scoring results
+    recommendations = []
+    for s in scores:
+        recommendations.append({
+            "supplier_id": s["supplier_id"],
+            "supplier_name": s["supplier_name"],
+            "score": s["total_score"],
+            "reason": f"质量{s['quality']:.0f}/交付{s['delivery']:.0f}/价格{s['price']:.0f}/服务{s['service']:.0f}"
+                      + (f"，风险罚分{s.get('risk_penalty', 0):.1f}" if s.get("risk_penalty", 0) > 0 else ""),
+        })
+
+    result = {
+        "recommendations": recommendations,
+        "summary": f"共评估 {len(recommendations)} 家供应商，推荐 {recommendations[0]['supplier_name']}" if recommendations else "无可用供应商",
+        "confidence": 0.9,
+    }
 
     record = save_decision(
         db, "supplier_recommend",
@@ -351,43 +403,63 @@ def ai_supplier_ranking(
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    """AI 供应商智能排名"""
+    """供应商智能排名（基于确定性评分算法）"""
+    from app.services.supplier_scoring import calc_supplier_score
+
+    scores = calc_supplier_score(supplier_id=None, db=db)
+    if isinstance(scores, dict) and "error" in scores:
+        raise HTTPException(status_code=503, detail=scores.get("error", "供应商评分服务不可用"))
+
+    # Build supplier_data in original format for backward compatibility
     suppliers = db.query(Supplier).filter(Supplier.status == "active").all()
-
-    # Compute evaluation averages
-    eval_agg = defaultdict(lambda: {"quality": [], "delivery": [], "price": [], "service": [], "total": []})
-    for e in db.query(SupplierEvaluation).all():
-        eval_agg[e.supplier_id]["quality"].append(e.quality_score)
-        eval_agg[e.supplier_id]["delivery"].append(e.delivery_score)
-        eval_agg[e.supplier_id]["price"].append(e.price_score)
-        eval_agg[e.supplier_id]["service"].append(e.service_score)
-        eval_agg[e.supplier_id]["total"].append(e.total_score)
-
-    po_stats = defaultdict(lambda: {"total": 0, "completed": 0})
-    for po in db.query(PurchaseOrder).all():
-        po_stats[po.supplier_id]["total"] += 1
-        if po.status == "completed":
-            po_stats[po.supplier_id]["completed"] += 1
+    score_map = {s["supplier_id"]: s for s in scores}
 
     supplier_data = []
+    ai_rankings = []
     for s in suppliers:
-        ev = eval_agg.get(s.id, {})
-        avg_total = round(sum(ev["total"]) / len(ev["total"]), 2) if ev["total"] else 0
-        stats = po_stats[s.id]
-        delivery_rate_val = round(stats["completed"] / stats["total"] * 100, 1) if stats["total"] > 0 else None
+        sc = score_map.get(s.id, {})
         supplier_data.append({
             "id": s.id,
             "name": s.name,
             "rating": s.rating,
             "delivery_lead_time": s.delivery_lead_time,
-            "avg_evaluation": avg_total,
-            "delivery_rate": delivery_rate_val,
+            "avg_evaluation": sc.get("total_score", 0),
+            "delivery_rate": None,
+        })
+        strengths_parts = []
+        weaknesses_parts = []
+        if sc.get("quality", 0) >= 80:
+            strengths_parts.append("质量优异")
+        elif sc.get("quality", 0) < 60:
+            weaknesses_parts.append("质量偏低")
+        if sc.get("delivery", 0) >= 80:
+            strengths_parts.append("交付可靠")
+        elif sc.get("delivery", 0) < 60:
+            weaknesses_parts.append("交付不稳")
+        if sc.get("price", 0) >= 80:
+            strengths_parts.append("价格优势")
+        elif sc.get("price", 0) < 60:
+            weaknesses_parts.append("价格偏高")
+        if sc.get("is_single_source"):
+            weaknesses_parts.append("单源依赖风险")
+        if sc.get("risk_penalty", 0) > 0:
+            weaknesses_parts.append(f"风险罚分{sc['risk_penalty']:.1f}")
+        ai_rankings.append({
+            "supplier_id": s.id,
+            "supplier_name": s.name,
+            "ai_score": sc.get("total_score", 0),
+            "strengths": " ".join(strengths_parts),
+            "weaknesses": " ".join(weaknesses_parts),
+            "suggestion": sc.get("suggested_share", ""),
         })
 
-    # Call AI for intelligent ranking
-    ai_result = supplier_ranking_ai(supplier_data)
-    if ai_result and ai_result.get("status") == "error":
-        raise HTTPException(status_code=503, detail=ai_result.get("error", "AI 服务不可用"))
+    # Build ai_analysis in original format
+    top = ai_rankings[0] if ai_rankings else None
+    ai_result = {
+        "rankings": ai_rankings,
+        "summary": f"共评估 {len(ai_rankings)} 家供应商，推荐 {top['supplier_name']}（综合评分 {top['ai_score']:.1f}）" if top else "暂无供应商数据",
+        "confidence": 0.9,
+    }
     return {"suppliers": supplier_data, "ai_analysis": ai_result}
 
 
@@ -477,7 +549,7 @@ def ai_sales_prediction(
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    """AI 销售预测（AI 不可用时 WMA 兜底）"""
+    """销售预测（基于WMA确定性算法）"""
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="产品不存在")
@@ -492,19 +564,33 @@ def ai_sales_prediction(
     )
     sales_data = [{"date": str(h.order_date), "qty": h.quantity} for h in history_data]
 
-    result = sales_forecast(product.name, sales_data)
-    predictions = []
-    if result and result.get("predictions"):
-        predictions = result["predictions"]
-    elif result and result.get("status") == "error":
-        # AI unavailable — fall back to WMA
-        from app.tools.sales_tools import _wma_fallback
-        hist_for_wma = [{"date": d["date"], "quantity": d["qty"]} for d in sales_data]
-        predictions = _wma_fallback(hist_for_wma, 30)
+    # Use WMA fallback as deterministic prediction method
+    from app.tools.sales_tools import _wma_fallback
+    hist_for_wma = [{"date": d["date"], "quantity": d["qty"]} for d in sales_data]
+    predictions = _wma_fallback(hist_for_wma, 30)
+
+    # Determine trend from recent data
+    if len(hist_for_wma) >= 14:
+        recent_qty = sum(h["quantity"] for h in hist_for_wma[-7:])
+        earlier_qty = sum(h["quantity"] for h in hist_for_wma[:7])
+        if earlier_qty > 0:
+            change_pct = (recent_qty - earlier_qty) / earlier_qty * 100
+            if change_pct > 10:
+                trend = "上升"
+            elif change_pct < -10:
+                trend = "下降"
+            else:
+                trend = "平稳"
+        else:
+            trend = "数据不足"
+    else:
+        trend = "数据不足"
 
     # Generate prediction dates
     last_date = history_data[0][1] if history_data else date.today()
     prediction_dates = [(last_date + timedelta(days=i + 1)).strftime("%Y-%m-%d") for i in range(len(predictions))]
+
+    confidence = 0.85 if len(hist_for_wma) >= 14 else 0.5
 
     return {
         "product_id": product.id,
@@ -512,8 +598,8 @@ def ai_sales_prediction(
         "history": sales_data[-30:],
         "predictions": predictions,
         "prediction_dates": prediction_dates,
-        "trend": (result or {}).get("trend", "平稳"),
-        "seasonal_factor": (result or {}).get("seasonal_factor", ""),
-        "suggestion": (result or {}).get("suggestion", ""),
-        "confidence": (result or {}).get("confidence", 0),
+        "trend": trend,
+        "seasonal_factor": "",
+        "suggestion": f"基于WMA预测未来30天需求约{sum(predictions)}件，趋势{trend}",
+        "confidence": confidence,
     }
