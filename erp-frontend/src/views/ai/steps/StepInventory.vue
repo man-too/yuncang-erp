@@ -25,6 +25,21 @@
       <div class="table-header">
         <span class="section-title">库存产品清单</span>
         <div class="header-right">
+          <el-select
+            v-model="productFilter"
+            placeholder="筛选产品"
+            clearable
+            filterable
+            size="small"
+            style="width: 220px;"
+          >
+            <el-option
+              v-for="p in store.allProducts"
+              :key="p.product_id"
+              :label="`${p.product_name}（${p.product_code}）`"
+              :value="p.product_id"
+            />
+          </el-select>
           <el-input
             v-model="searchKeyword"
             placeholder="搜索产品…"
@@ -328,6 +343,7 @@ const kpiCapitalOccupied = computed(() => {
 // =========================================================================
 
 const searchKeyword = ref('')
+const productFilter = ref<number | null>(null)
 
 // =========================================================================
 // Section 2b: Batch ROP data (loaded on mount for risk ranking)
@@ -451,12 +467,27 @@ const sortedProducts = computed(() => {
 })
 
 const filteredProducts = computed(() => {
-  if (!searchKeyword.value.trim()) return sortedProducts.value
-  const kw = searchKeyword.value.trim().toLowerCase()
-  return sortedProducts.value.filter(p =>
-    p.product_name.toLowerCase().includes(kw) ||
-    (p.product_code && p.product_code.toLowerCase().includes(kw))
-  )
+  let result = sortedProducts.value
+  // Product dropdown filter
+  if (productFilter.value != null) {
+    result = result.filter(p => p.product_id === productFilter.value)
+  }
+  // Keyword search filter
+  if (searchKeyword.value.trim()) {
+    const kw = searchKeyword.value.trim().toLowerCase()
+    result = result.filter(p =>
+      p.product_name.toLowerCase().includes(kw) ||
+      (p.product_code && p.product_code.toLowerCase().includes(kw))
+    )
+  }
+  return result
+})
+
+// When filter selects a single product, auto-expand it
+watch(productFilter, (pid) => {
+  if (pid != null) {
+    expandedProductId.value = pid
+  }
 })
 
 function statusLabel(row: { product_id: number; current_qty: number; min_stock: number; max_stock: number }): string {
