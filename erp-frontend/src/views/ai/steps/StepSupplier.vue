@@ -94,6 +94,7 @@
             border
             max-height="240"
             style="width: 100%;"
+            :header-cell-style="{ padding: '10px 0' }"
           >
             <el-table-column width="50" align="center">
               <template #default="{ row }">
@@ -104,7 +105,7 @@
               </template>
             </el-table-column>
             <el-table-column prop="supplier_name" label="供应商名称" min-width="130" show-overflow-tooltip />
-            <el-table-column label="综合评分" width="90" align="center" sortable :sort-method="sortByScore">
+            <el-table-column label="综合评分" width="100" align="center" sortable :sort-method="sortByScore">
               <template #default="{ row }">
                 <el-tag
                   :type="row.total_score >= 80 ? 'success' : row.total_score >= 60 ? 'warning' : 'danger'"
@@ -133,7 +134,7 @@
                 <span v-if="!row.is_single_source && row.risk_penalty === 0" style="color: #67c23a; font-size: 12px;">低风险</span>
               </template>
             </el-table-column>
-            <el-table-column label="交付评分" width="85" align="center">
+            <el-table-column label="交付评分" width="95" align="center">
               <template #default="{ row }">
                 {{ row.delivery ?? '—' }}
               </template>
@@ -719,6 +720,11 @@ onMounted(async () => {
 .suggested-qty {
   font-size: 12px;
   color: #909399;
+}
+
+/* Fix: supplier allocation table header height to prevent label overlap */
+.product-card :deep(.el-table__header th) {
+  padding: 10px 0;
 }
 
 /* Section 4: Summary */

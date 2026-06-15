@@ -16,7 +16,7 @@
     </div>
 
     <div v-loading="loading" style="height: 360px; margin-bottom: 12px;">
-      <v-chart v-if="!loading && hasData" :option="chartOption" autoresize style="height: 100%;" />
+      <v-chart v-if="!loading && hasData" :key="`sales-${viewMode}-${filterProductId}-${timeRange}-${activeView}`" :option="chartOption" autoresize style="height: 100%;" />
       <el-empty v-else-if="!loading" description="暂无销售数据" />
     </div>
 

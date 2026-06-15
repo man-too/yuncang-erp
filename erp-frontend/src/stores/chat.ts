@@ -131,6 +131,17 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  /** Generate a signature string for a chart block to detect duplicates */
+  function chartBlockSignature(block: MessageBlock): string {
+    const d = block.data || {}
+    const chartType = block.chartType || d.series?.[0]?.type || 'unknown'
+    const seriesLen = d.series?.length ?? 0
+    const firstSeriesDataLen = d.series?.[0]?.data?.length ?? 0
+    const xAxisLen = d.xAxis?.data?.length ?? 0
+    const title = d.title?.text ?? ''
+    return `${chartType}-${seriesLen}-${firstSeriesDataLen}-${xAxisLen}-${title}`
+  }
+
   function normalizeBlock(b: any): MessageBlock {
     // Ensure action items have initial status
     if (b.type === 'actions' && b.actions) {
@@ -257,10 +268,22 @@ export const useChatStore = defineStore('chat', () => {
 
       const finalContent = llmContent || fallbackContent || '数据已加载，请查看下方图表/表格。'
       // Update the assistant message
+      // Merge blocks: only include LLM chart blocks if they don't duplicate direct blocks
+      const directChartSigs = new Set(
+        directBlocks
+          .filter(b => b.type === 'chart' && b.data)
+          .map(b => chartBlockSignature(b))
+      )
+      const filteredLlmBlocks = llmBlocks.filter(b => {
+        if (b.type === 'chart' && b.data) {
+          return !directChartSigs.has(chartBlockSignature(b))
+        }
+        return true
+      })
       const msg = messages.value.find(m => m.id === assistantId)
       if (msg) {
         msg.content = finalContent
-        msg.blocks = [...directBlocks, ...llmBlocks]
+        msg.blocks = [...directBlocks, ...filteredLlmBlocks]
       }
     } catch {
       const msg = messages.value.find(m => m.id === assistantId)

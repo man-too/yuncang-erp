@@ -143,6 +143,7 @@
           <div v-loading="detailChartLoading" class="chart-area" style="height: 300px;">
             <v-chart
               v-if="!detailChartLoading && (detailHistoryData.length > 0 || detailPredictionData.length > 0)"
+              :key="`detail-chart-${expandedProductId}-${detailTimeRange}`"
               :option="detailChartOption"
               autoresize
               style="height: 100%;"
@@ -233,6 +234,7 @@
           <div v-if="block.type === 'chart'" class="ai-chart-wrapper">
             <v-chart
               v-if="block.data"
+              :key="`ai-chart-${bi}-${block.chartType || 'line'}-${(block.data.series || []).length}`"
               :option="block.data"
               autoresize
               style="height: 320px;"

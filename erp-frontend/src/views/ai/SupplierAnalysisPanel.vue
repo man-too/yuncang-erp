@@ -12,7 +12,7 @@
     </div>
 
     <div v-loading="loading" style="height: 300px; margin-bottom: 12px;">
-      <v-chart v-if="!loading && chartData.length" :option="chartOption" autoresize style="height: 100%;" />
+      <v-chart v-if="!loading && chartData.length" :key="`supplier-${activeMetric}-${filterSupplierId}`" :option="chartOption" autoresize style="height: 100%;" />
       <el-empty v-else-if="!loading" description="暂无供应商数据" />
     </div>
 

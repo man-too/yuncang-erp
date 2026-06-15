@@ -89,7 +89,7 @@ start_date = date(2026, 1, 5)
 end_date = date(2026, 6, 10)
 current = start_date
 
-# 每个产品的月度销量范围 (product_index: (min_qty, max_qty) per order)
+# 每个产品的日销量范围 (product_index: (min_qty, max_qty) per order)
 product_sales_config = {
     0: (5, 15),    # 钢材A型
     1: (50, 200),  # 塑料粒子
@@ -100,13 +100,10 @@ product_sales_config = {
 }
 
 while current <= end_date:
-    # 每周1-3个订单
-    orders_this_week = random.randint(1, 3)
-    for _ in range(orders_this_week):
+    # 每天生成1-2个订单，确保每天都有数据
+    orders_today = random.randint(1, 2)
+    for _ in range(orders_today):
         cust = random.choice(custs)
-        order_date = current + timedelta(days=random.randint(0, 6))
-        if order_date > end_date:
-            break
 
         # 每个订单1-3个产品
         num_items = random.randint(1, 3)
@@ -125,10 +122,10 @@ while current <= end_date:
 
         status = random.choice(['completed', 'completed', 'completed', 'approved', 'approved'])
         so = SaleOrder(
-            order_no=f'SO{order_date.strftime("%Y%m%d")}{so_idx:03d}',
+            order_no=f'SO{current.strftime("%Y%m%d")}{so_idx:03d}',
             customer_id=cust.id,
             status=status,
-            order_date=order_date,
+            order_date=current,
             total_amount=total,
             creator_id=1,
         )
@@ -148,7 +145,7 @@ while current <= end_date:
 
         so_idx += 1
 
-    current += timedelta(days=7)
+    current += timedelta(days=1)
 
 db.commit()
 for inv in db.query(Inventory).all():
@@ -157,5 +154,5 @@ db.commit()
 
 print('测试数据初始化完成！')
 print('管理员: admin / admin123')
-print('已创建: 4个供应商, 6个产品, 3个客户, 2个仓库, 库存数据, 1个采购订单, ~120个销售订单(6个月)')
+print('已创建: 4个供应商, 6个产品, 3个客户, 2个仓库, 库存数据, 1个采购订单, ~300个销售订单(6个月,每日数据)')
 db.close()

@@ -365,8 +365,19 @@ def _render_sales_trend(args: dict, db: Session) -> dict:
                 "_render": True,
             }
 
-        days = [r.day for r in rows]
-        qtys = [float(r.qty or 0) for r in rows]
+        # Build lookup from DB results
+        sales_map = {r.day: float(r.qty or 0) for r in rows}
+
+        # Fill complete date range with 0 for missing days
+        days = []
+        qtys = []
+        current = ninety_days_ago
+        end = date.today()
+        while current <= end:
+            day_str = current.strftime("%Y-%m-%d")
+            days.append(day_str)
+            qtys.append(sales_map.get(day_str, 0.0))
+            current += timedelta(days=1)
 
         # WMA prediction for next 7 days
         wma_weights = [0.05, 0.08, 0.12, 0.15, 0.18, 0.22, 0.20]

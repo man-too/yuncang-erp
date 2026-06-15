@@ -7,11 +7,17 @@
         <!-- 文字内容（简单 Markdown） -->
         <div class="msg-content" v-html="renderedContent" />
 
-        <!-- 结构化 Blocks (原有 + 防御性提取) -->
-        <div v-for="(block, bi) in allBlocks" :key="bi" class="msg-block">
+        <!-- 结构化 Blocks (原有 + 防御性提取, 自动去重) -->
+        <div v-for="(block, bi) in deduplicatedBlocks" :key="block._dedupKey ?? bi" class="msg-block">
           <!-- 图表 -->
           <div v-if="block.type === 'chart'" class="chart-container">
-            <v-chart v-if="hasValidChartData(block)" :option="chartWithDefaultTitle(block)" autoresize class="chart-render" />
+            <v-chart
+              v-if="hasValidChartData(block)"
+              :key="block._dedupKey ?? bi"
+              :option="chartWithDefaultTitle(block)"
+              autoresize
+              class="chart-render"
+            />
             <el-empty v-else description="图表数据加载失败" :image-size="80" />
           </div>
 
@@ -203,8 +209,53 @@ const renderedContent = computed(() => {
   return marked(cleanContent, { breaks: true })
 })
 
-// 合并原有 blocks 和额外提取的 blocks
-const allBlocks = computed(() => [...props.blocks, ...sanitized.value.extraBlocks])
+// 合并原有 blocks 和额外提取的 blocks，去重避免重影
+const deduplicatedBlocks = computed(() => {
+  const merged = [...props.blocks, ...sanitized.value.extraBlocks]
+  const seen = new Set<string>()
+  const result: (MessageBlock & { _dedupKey?: string })[] = []
+  for (let i = 0; i < merged.length; i++) {
+    const block = merged[i]
+    // Generate a dedup key based on block content
+    const dedupKey = blockKey(block, i)
+    // For chart blocks, check if we've already seen a chart with the same series signature
+    if (block.type === 'chart' && block.data) {
+      const signature = chartSignature(block)
+      if (seen.has(signature)) continue // Skip duplicate chart
+      seen.add(signature)
+    }
+    result.push({ ...block, _dedupKey: dedupKey })
+  }
+  return result
+})
+
+/** Generate a stable key for a block to avoid Vue reusing DOM incorrectly */
+function blockKey(block: MessageBlock, fallbackIndex: number): string {
+  if (block.type === 'chart' && block.data) {
+    return `chart-${chartSignature(block)}`
+  }
+  if (block.type === 'table' && block.columns) {
+    const colKeys = block.columns.map(c => c.key).join(',')
+    return `table-${colKeys}-${(block.rows || []).length}`
+  }
+  if (block.type === 'actions' && block.actions) {
+    return `actions-${block.actions.map(a => a.label).join(',')}`
+  }
+  return `block-${fallbackIndex}`
+}
+
+/** Generate a signature string for a chart block to detect duplicates */
+function chartSignature(block: MessageBlock): string {
+  const d = block.data || {}
+  const chartType = block.chartType || d.series?.[0]?.type || 'unknown'
+  const seriesLen = d.series?.length ?? 0
+  // Use first series data length + chartType as a rough signature
+  const firstSeriesDataLen = d.series?.[0]?.data?.length ?? 0
+  const xAxisLen = d.xAxis?.data?.length ?? 0
+  const yAxisLen = d.yAxis?.data?.length ?? 0
+  const title = d.title?.text ?? ''
+  return `${chartType}-${seriesLen}-${firstSeriesDataLen}-${xAxisLen}-${yAxisLen}-${title}`
+}
 
 function chartWithDefaultTitle(block: MessageBlock) {
   // IMPORTANT: never mutate block.data — create new object to avoid Vue reactive loops

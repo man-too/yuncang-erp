@@ -523,7 +523,7 @@ def ai_sales_history(
 
         return {"monthly_data": monthly_data, "top_products": top_products}
 
-    # 产品模式：返回日度数据
+    # 产品模式：返回日度数据（填补无销售日期为0）
     query = db.query(
         SaleOrder.order_date,
         func.sum(SaleOrderItem.quantity).label("total_qty"),
@@ -537,10 +537,20 @@ def ai_sales_history(
     query = query.group_by(SaleOrder.order_date).order_by(SaleOrder.order_date)
 
     rows = query.all()
-    return [
-        {"date": str(r.order_date), "total_qty": float(r.total_qty or 0), "total_amount": float(r.total_amount or 0)}
-        for r in rows
-    ]
+
+    # Build a lookup dict from DB results
+    sales_map = {r.order_date: (float(r.total_qty or 0), float(r.total_amount or 0)) for r in rows}
+
+    # Generate complete date range, filling missing days with 0
+    result = []
+    current = start
+    end = date.today()
+    while current <= end:
+        qty, amount = sales_map.get(current, (0.0, 0.0))
+        result.append({"date": str(current), "total_qty": qty, "total_amount": amount})
+        current += timedelta(days=1)
+
+    return result
 
 
 @router.post("/sales-prediction")
@@ -555,14 +565,23 @@ def ai_sales_prediction(
         raise HTTPException(status_code=404, detail="产品不存在")
 
     history_data = (
-        db.query(SaleOrderItem.quantity, SaleOrder.order_date)
+        db.query(SaleOrder.order_date, func.sum(SaleOrderItem.quantity).label("total_qty"))
         .join(SaleOrder, SaleOrder.id == SaleOrderItem.order_id)
         .filter(SaleOrderItem.product_id == product_id)
-        .order_by(SaleOrder.order_date.desc())
-        .limit(90)
+        .filter(SaleOrder.order_date >= date.today() - timedelta(days=90))
+        .group_by(SaleOrder.order_date)
+        .order_by(SaleOrder.order_date)
         .all()
     )
-    sales_data = [{"date": str(h.order_date), "qty": h.quantity} for h in history_data]
+
+    # Fill complete date range with 0 for missing days
+    sales_map = {h.order_date: float(h.total_qty or 0) for h in history_data}
+    sales_data = []
+    current = date.today() - timedelta(days=90)
+    end = date.today()
+    while current <= end:
+        sales_data.append({"date": str(current), "qty": sales_map.get(current, 0.0)})
+        current += timedelta(days=1)
 
     # Use WMA fallback as deterministic prediction method
     from app.tools.sales_tools import _wma_fallback
@@ -587,7 +606,7 @@ def ai_sales_prediction(
         trend = "数据不足"
 
     # Generate prediction dates
-    last_date = history_data[0][1] if history_data else date.today()
+    last_date = date.today()
     prediction_dates = [(last_date + timedelta(days=i + 1)).strftime("%Y-%m-%d") for i in range(len(predictions))]
 
     confidence = 0.85 if len(hist_for_wma) >= 14 else 0.5

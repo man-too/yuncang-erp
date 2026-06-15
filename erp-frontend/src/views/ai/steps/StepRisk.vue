@@ -42,8 +42,16 @@
         <span class="section-title">风险矩阵</span>
         <el-button size="small" @click="runAudit" :loading="loading">重新审核</el-button>
       </div>
+      <div class="filter-row">
+        <span class="filter-label">风险类型筛选：</span>
+        <el-checkbox-group v-model="selectedCategories" size="small">
+          <el-checkbox label="供应商风险" value="供应商风险" />
+          <el-checkbox label="库存风险" value="库存风险" />
+          <el-checkbox label="需求风险" value="需求风险" />
+        </el-checkbox-group>
+      </div>
       <el-table
-        :data="riskMatrix"
+        :data="filteredRiskMatrix"
         stripe
         size="small"
         border
@@ -157,6 +165,9 @@ import { aiApi } from '@/api'
 const store = usePurchaseDecisionStore()
 const loading = ref(false)
 
+// ----- Risk type filter -----
+const selectedCategories = ref<string[]>(['供应商风险', '库存风险', '需求风险'])
+
 // ----- Computed from store.auditResult -----
 
 const auditResult = computed(() => store.auditResult)
@@ -165,6 +176,11 @@ const riskMatrix = computed(() => {
   const res = auditResult.value
   if (!res || !Array.isArray(res.risk_matrix)) return []
   return res.risk_matrix
+})
+
+const filteredRiskMatrix = computed(() => {
+  if (selectedCategories.value.length === 0) return riskMatrix.value
+  return riskMatrix.value.filter((row: any) => selectedCategories.value.includes(row.category))
 })
 
 const overallRisk = computed(() => {
@@ -437,6 +453,16 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.filter-label {
+  font-size: 13px;
+  color: #606266;
+  white-space: nowrap;
 }
 .section-title {
   font-weight: 600;

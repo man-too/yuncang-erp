@@ -72,7 +72,23 @@ def _query_sales_history(args: dict, db: Session) -> dict:
     q = q.group_by(date_label).order_by(date_label)
     rows = q.limit(366).all()
 
-    items = [{"date": str(r.period), "quantity": float(r.qty or 0), "amount": float(r.amount or 0)} for r in rows]
+    if group_by == "day":
+        # Fill missing days with 0 for daily granularity
+        sales_map = {}
+        for r in rows:
+            period_str = str(r.period)
+            sales_map[period_str] = {"quantity": float(r.qty or 0), "amount": float(r.amount or 0)}
+
+        items = []
+        current = since
+        end = date.today()
+        while current <= end:
+            key = str(current)
+            entry = sales_map.get(key, {"quantity": 0.0, "amount": 0.0})
+            items.append({"date": key, "quantity": entry["quantity"], "amount": entry["amount"]})
+            current += timedelta(days=1)
+    else:
+        items = [{"date": str(r.period), "quantity": float(r.qty or 0), "amount": float(r.amount or 0)} for r in rows]
 
     total_qty = sum(it["quantity"] for it in items)
     total_amount = sum(it["amount"] for it in items)
@@ -117,7 +133,15 @@ def _forecast_sales(args: dict, db: Session) -> dict:
         .order_by(SaleOrder.order_date)
         .all()
     )
-    history = [{"date": str(r[0]), "quantity": float(r[1] or 0)} for r in rows]
+
+    # Fill complete date range with 0 for missing days
+    sales_map = {r[0]: float(r[1] or 0) for r in rows}
+    history = []
+    current = since
+    end = date.today()
+    while current <= end:
+        history.append({"date": str(current), "quantity": sales_map.get(current, 0.0)})
+        current += timedelta(days=1)
 
     # Use WMA fallback as the deterministic prediction method
     predictions = _wma_fallback(history, 30, product_name=prod.name)
