@@ -42,6 +42,25 @@ CITY_COORDS = {
     "福州": (26.0745, 119.2965),
     "合肥": (31.8206, 117.2272),
     "南宁": (22.8170, 108.3665),
+    "揭阳": (23.5498, 116.3728),
+    "汕头": (23.3535, 116.6817),
+    "潮州": (23.6569, 116.6226),
+    "佛山": (23.1291, 113.1219),
+    "东莞": (23.0489, 113.7445),
+    "惠州": (23.1116, 114.4152),
+    "中山": (22.5176, 113.3926),
+    "珠海": (22.2710, 113.5767),
+    "江门": (22.5789, 113.0815),
+    "湛江": (21.2707, 110.3590),
+    "茂名": (21.6629, 110.9179),
+    "肇庆": (23.0472, 112.4651),
+    "梅州": (24.2883, 116.1224),
+    "清远": (23.6817, 113.0561),
+    "韶关": (24.8107, 113.3244),
+    "阳江": (21.8581, 111.9822),
+    "河源": (23.7432, 114.7003),
+    "汕尾": (22.7864, 115.3649),
+    "云浮": (22.9251, 112.0444),
     "贵阳": (26.6470, 106.6302),
     "太原": (37.8706, 112.5489),
     "石家庄": (38.0428, 114.5149),
@@ -80,6 +99,25 @@ WEATHER_TYPE_MAP = {
 }
 
 
+async def _geocode_city(city: str) -> tuple[float, float] | None:
+    """通过 Open-Meteo Geocoding API 查询城市坐标（fallback）"""
+    try:
+        async with httpx.AsyncClient(timeout=8) as http_client:
+            resp = await http_client.get(
+                "https://geocoding-api.open-meteo.com/v1/search",
+                params={"name": city, "count": 1, "language": "zh", "format": "json"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            results = data.get("results", [])
+            if results:
+                r = results[0]
+                return (float(r["latitude"]), float(r["longitude"]))
+    except Exception:
+        pass
+    return None
+
+
 async def query_weather(city: str, days: int = 7, db: Session | None = None) -> dict:
     """查询天气并返回受影响产品
 
@@ -90,17 +128,21 @@ async def query_weather(city: str, days: int = 7, db: Session | None = None) -> 
     """
     coords = CITY_COORDS.get(city)
     if not coords:
-        return {
-            "city": city,
-            "error": f"未找到城市「{city}」的坐标，支持的城市：{', '.join(list(CITY_COORDS.keys())[:10])}等"
-        }
+        # 不在预置列表中，尝试 geocoding API 自动查坐标
+        coords = await _geocode_city(city)
+        if not coords:
+            supported = ', '.join(list(CITY_COORDS.keys())[:15])
+            return {
+                "city": city,
+                "error": f"未找到城市「{city}」的坐标，也未能通过地理编码查询。支持的城市：{supported} 等"
+            }
 
     lat, lon = coords
     days = min(max(days, 1), 16)
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
+        async with httpx.AsyncClient(timeout=10) as http_client:
+            resp = await http_client.get(
                 "https://api.open-meteo.com/v1/forecast",
                 params={
                     "latitude": lat,
