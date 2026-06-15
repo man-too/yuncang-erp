@@ -99,8 +99,8 @@ async def query_weather(city: str, days: int = 7, db: Session | None = None) -> 
     days = min(max(days, 1), 16)
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
+        async with httpx.AsyncClient(timeout=10) as http_client:
+            resp = await http_client.get(
                 "https://api.open-meteo.com/v1/forecast",
                 params={
                     "latitude": lat,
