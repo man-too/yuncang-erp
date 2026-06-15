@@ -43,7 +43,11 @@ from app.tools.chart_tools import (
     _render_transfer_advice_table,
 )
 from app.tools.calculation_tools import execute as _calc_exec
-from app.tools.weather_tools import execute as _weather_exec
+from app.tools.weather_tools import execute as _weather_exec_raw
+
+# weather_tools.execute 签名是 (name, args, db)，需要适配 (args, db)
+def _weather_exec(args: dict, db) -> dict | None:
+    return _weather_exec_raw("query_weather", args, db)
 
 # ── Service imports (for calculation tool wrappers) ─────────────────────
 from app.services.calculation_service import (
