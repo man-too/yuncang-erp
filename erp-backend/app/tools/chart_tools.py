@@ -771,6 +771,8 @@ def _render_supplier_ranking(db: Session) -> dict:
 
 def _recommend_restock(args: dict, db: Session) -> dict:
     """推荐补货清单（准备数据供 LLM 分析）"""
+    from app.services.calculation_service import batch_calc_reorder_point
+
     q = (
         db.query(Inventory, Product, Warehouse.name.label("wname"))
         .join(Product, Inventory.product_id == Product.id)
@@ -780,50 +782,79 @@ def _recommend_restock(args: dict, db: Session) -> dict:
     if args.get("product_ids"):
         q = q.filter(Inventory.product_id.in_(args["product_ids"]))
 
-    rows = q.order_by(Inventory.quantity).limit(30).all()
+    rows = q.order_by(Inventory.quantity).limit(60).all()
 
     if not rows:
-        return {"recommendations": [], "message": "暂无不需补货，库存充足"}
+        return {"recommendations": [], "message": "暂无补货需求，库存充足"}
 
-    # Compute suggested order qty based on min/max stock
-    thirty_days_ago = date.today() - timedelta(days=30)
-    recommendations = []
+    # 按 product_id 聚合：同一产品在多个仓库都低于 min_stock 时不重复推荐
+    # 记录库存最低的仓库作为代表仓库
+    by_product: dict[int, dict] = {}
     for inv, prod, wname in rows:
-        # Get recent daily sales
-        sales_row = (
-            db.query(func.sum(SaleOrderItem.quantity))
-            .join(SaleOrder, SaleOrder.id == SaleOrderItem.order_id)
-            .filter(
-                SaleOrderItem.product_id == prod.id,
-                SaleOrder.order_date >= thirty_days_ago,
-                SaleOrder.status != "cancelled",
-            )
-            .scalar()
-        )
-        daily_sales = (float(sales_row or 0)) / 30.0
-
-        # Suggest order quantity
-        gap = prod.max_stock - inv.quantity
-        if daily_sales > 0:
-            suggested = max(int(daily_sales * prod.min_stock / max(inv.quantity, 1) * 1.5), int(gap))
+        cur = float(inv.quantity)
+        if prod.id not in by_product:
+            by_product[prod.id] = {
+                "prod": prod,
+                "min_inv_qty": cur,
+                "primary_warehouse": wname,
+                "warehouses_low": [wname],
+            }
         else:
-            suggested = int(max(gap, prod.max_stock * 0.3))
+            entry = by_product[prod.id]
+            entry["warehouses_low"].append(wname)
+            if cur < entry["min_inv_qty"]:
+                entry["min_inv_qty"] = cur
+                entry["primary_warehouse"] = wname
+
+    product_ids = list(by_product.keys())
+    rop_map = batch_calc_reorder_point(product_ids, db)
+
+    if not rop_map:
+        return {"recommendations": [], "warning": "ROP 批量计算返回为空，无法生成推荐", "total": 0}
+
+    recommendations = []
+    for pid, info in by_product.items():
+        rop_info = rop_map.get(pid, {})
+        suggested = int(rop_info.get("suggested_qty", 0))
 
         if suggested <= 0:
             continue
+
+        prod = info["prod"]
+        # 优先使用 ROP 提供的产品级 current_qty（跨仓库合计），
+        # 缺失时退回最低单仓库库存
+        product_current = float(rop_info.get("current_qty", info["min_inv_qty"]))
+        min_stock = float(prod.min_stock or 0)
+
+        if product_current == 0:
+            priority = "critical"
+        elif min_stock > 0 and product_current < min_stock * 0.5:
+            priority = "high"
+        else:
+            priority = "medium"
 
         recommendations.append({
             "product_id": prod.id,
             "product_name": prod.name,
             "product_code": prod.code,
-            "warehouse": wname,
-            "current_qty": float(inv.quantity),
-            "min_stock": float(prod.min_stock),
-            "max_stock": float(prod.max_stock),
-            "suggested_qty": min(suggested, int(prod.max_stock * 2)),
+            "warehouse": info["primary_warehouse"],
+            "warehouses_low": info["warehouses_low"],
+            "current_qty": product_current,
+            "min_stock": min_stock,
+            "max_stock": float(prod.max_stock or 0),
+            "suggested_qty": suggested,
             "unit": prod.unit,
-            "daily_sales_avg": round(daily_sales, 1),
-            "priority": "critical" if inv.quantity == 0 else "high" if inv.quantity < prod.min_stock * 0.5 else "medium",
+            "daily_sales_avg": rop_info.get("avg_daily_sales_30d", 0.0),
+            "priority": priority,
+            # 新增字段（来自 ROP 状态快照）
+            "rop": rop_info.get("rop", 0.0),
+            "safety_stock": rop_info.get("safety_stock", 0.0),
+            "lead_time": rop_info.get("lead_time", 7),
+            "abc_class": rop_info.get("abc_class", "C"),
+            "in_transit_qty": rop_info.get("in_transit_qty", 0.0),
+            "backlog_qty": rop_info.get("backlog_qty", 0.0),
+            "trend": rop_info.get("trend", "平稳"),
+            "demand_desc": rop_info.get("demand_desc", ""),
         })
 
     return {"recommendations": recommendations, "total": len(recommendations)}

@@ -286,11 +286,9 @@ const fullyAllocatedCount = computed(() =>
 const canProceed = computed(() => {
   if (store.allProducts.length === 0) return false
   return store.allProducts.every(p => {
-    const needed = getNeededQty(p)
-    const allocated = allocatedQty(p.product_id)
-    // Must have at least one supplier checked and allocation must not exceed needed
-    const hasSupplier = (store.supplierChoices[p.product_id] || []).length > 0
-    return hasSupplier && allocated > 0 && allocated <= needed
+    const choices = store.supplierChoices[p.product_id] || []
+    // Just need at least one supplier; over/under allocation handled by Step 2 risk audit.
+    return choices.length > 0
   })
 })
 
@@ -412,31 +410,100 @@ function getSuggestedAllocation(productId: number, supplier: any): number {
 }
 
 // ---- Methods: User Actions ----
-function onSupplierToggle(productId: number, supplierId: number, checked: boolean) {
+// Helper: redistribute the current needed qty across all currently-checked
+// suppliers proportionally to delivery score. Mirrors the logic used elsewhere
+// (getSuggestedAllocation / onMounted) so allocations stay consistent.
+function recalculateAllocations(productId: number) {
+  const checked = store.supplierChoices[productId] || []
+  if (!store.supplierQuantities[productId]) {
+    store.supplierQuantities[productId] = {}
+  }
+  // Drop allocations for any uncheck suppliers
+  for (const sid of Object.keys(store.supplierQuantities[productId])) {
+    if (!checked.includes(Number(sid))) {
+      delete store.supplierQuantities[productId][Number(sid)]
+    }
+  }
+  if (checked.length === 0) return
+
+  const product = store.allProducts.find(p => p.product_id === productId)
+  if (!product) return
+  const needed = getNeededQty(product)
+  if (needed <= 0) return
+
+  const checkedScoreData = scoreData.value.filter(s => checked.includes(s.supplier_id))
+  const totalDelivery = checkedScoreData.reduce((sum, s) => sum + (s.delivery || 0), 0)
+  if (totalDelivery <= 0) {
+    // Even split fallback
+    const each = Math.floor(needed / checked.length)
+    for (const sid of checked) {
+      store.supplierQuantities[productId][sid] = each
+    }
+    const used = each * checked.length
+    if (used !== needed) {
+      store.supplierQuantities[productId][checked[0]] += (needed - used)
+    }
+    return
+  }
+  for (const s of checkedScoreData) {
+    const proportion = (s.delivery || 0) / totalDelivery
+    store.supplierQuantities[productId][s.supplier_id] = Math.round(needed * proportion)
+  }
+  // Rounding fix
+  const allocated = allocatedQty(productId)
+  if (allocated !== needed && checkedScoreData.length > 0) {
+    const topId = checkedScoreData[0].supplier_id
+    store.supplierQuantities[productId][topId] =
+      (store.supplierQuantities[productId][topId] || 0) + (needed - allocated)
+  }
+}
+
+async function onSupplierToggle(productId: number, supplierId: number, checked: boolean) {
   if (!store.supplierChoices[productId]) {
     store.supplierChoices[productId] = []
   }
   const list = store.supplierChoices[productId]
+  const supplierName =
+    scoreData.value.find(s => s.supplier_id === supplierId)?.supplier_name ||
+    store.supplierInfo[supplierId]?.name ||
+    `供应商#${supplierId}`
+
   if (checked) {
     if (!list.includes(supplierId)) list.push(supplierId)
-    // Auto-fill suggested allocation
-    const supplier = scoreData.value.find(s => s.supplier_id === supplierId)
-    if (supplier) {
-      const suggested = getSuggestedAllocation(productId, supplier)
-      if (suggested > 0) {
-        if (!store.supplierQuantities[productId]) {
-          store.supplierQuantities[productId] = {}
-        }
-        store.supplierQuantities[productId][supplierId] = suggested
-      }
-    }
   } else {
     const idx = list.indexOf(supplierId)
     if (idx !== -1) list.splice(idx, 1)
-    // Clear allocation for this supplier
     if (store.supplierQuantities[productId]) {
       delete store.supplierQuantities[productId][supplierId]
     }
+  }
+
+  // Capture old suggested qty for toast diff
+  const oldQty = getNeededQtyById(productId)
+
+  // Refetch suggested qty using the relevant supplier's lead-time
+  try {
+    if (checked) {
+      // Use the just-checked supplier's lead time
+      await store.fetchSuggestedQty(productId, supplierId)
+    } else if (list.length > 0) {
+      // Use the first remaining supplier's lead time
+      await store.fetchSuggestedQty(productId, list[0])
+    } else {
+      // No suppliers — default lead time (no supplier_id)
+      await store.fetchSuggestedQty(productId)
+    }
+  } catch (e) {
+    console.error('fetchSuggestedQty in onSupplierToggle failed:', e)
+  }
+
+  const newQty = getNeededQtyById(productId)
+
+  // Redistribute allocations across currently-checked suppliers
+  recalculateAllocations(productId)
+
+  if (newQty !== oldQty) {
+    ElMessage.info(`已根据${supplierName}交期更新建议补货量：${oldQty}→${newQty}`)
   }
 }
 

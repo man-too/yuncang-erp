@@ -19,6 +19,17 @@ export interface RestockItem {
   daily_sales_avg: number
   priority: string
   purchase_price?: number
+  // Phase 3: ROP-related fields surfaced from /ai/batch-rop
+  rop?: number
+  in_transit_qty?: number
+  backlog_qty?: number
+  trend?: string
+  trend_change_pct?: number
+  abc_class?: string
+  demand_desc?: string
+  // Phase 3: AI replenish-recommend metadata
+  aiReason?: string
+  aiFactors?: string[]
 }
 
 export const usePurchaseDecisionStore = defineStore('purchaseDecision', () => {
@@ -65,28 +76,72 @@ export const usePurchaseDecisionStore = defineStore('purchaseDecision', () => {
   const inventoryKpi = ref<any>(null)
   // Phase 3: 风险审核结果
   const auditResult = ref<any>(null)
+  // Phase 3: AI 补货推荐摘要
+  const aiSummary = ref<string>('')
 
   async function fetchLowStockProducts() {
     isLoading.value = true
     try {
       const res: any = await inventoryApi.lowStock({ page_size: 100 })
       if (res && res.items) {
-        allProducts.value = res.items.map((item: any) => ({
-          product_id: item.product_id,
-          product_name: item.product_name || `产品#${item.product_id}`,
-          product_code: item.product_code || '',
-          specification: item.specification || '',
-          warehouse_id: item.warehouse_id,
-          warehouse_name: item.warehouse_name || `仓库#${item.warehouse_id}`,
-          current_qty: item.current_qty ?? item.quantity ?? 0,
-          min_stock: item.min_stock || 0,
-          max_stock: item.max_stock || (item.min_stock || 0) * 2,
-          suggested_qty: Math.max(0, (item.max_stock || 0) - (item.current_qty ?? item.quantity ?? 0)),
-          unit: item.unit || '个',
-          daily_sales_avg: 0,
-          priority: (item.current_qty ?? item.quantity) === 0 ? 'critical' : (item.current_qty ?? item.quantity) < (item.min_stock || 0) ? 'high' : 'medium',
-          purchase_price: item.purchase_price || 0,
-        }))
+        // Build base items first (fallback formula in suggested_qty)
+        const baseItems: RestockItem[] = res.items.map((item: any) => {
+          const currentQty = item.current_qty ?? item.quantity ?? 0
+          const maxStock = item.max_stock || (item.min_stock || 0) * 2
+          return {
+            product_id: item.product_id,
+            product_name: item.product_name || `产品#${item.product_id}`,
+            product_code: item.product_code || '',
+            specification: item.specification || '',
+            warehouse_id: item.warehouse_id,
+            warehouse_name: item.warehouse_name || `仓库#${item.warehouse_id}`,
+            current_qty: currentQty,
+            min_stock: item.min_stock || 0,
+            max_stock: maxStock,
+            // Fallback formula; will be overwritten by batch-rop result if available
+            suggested_qty: Math.max(0, (item.max_stock || 0) - currentQty),
+            unit: item.unit || '个',
+            daily_sales_avg: 0,
+            priority: currentQty === 0 ? 'critical' : currentQty < (item.min_stock || 0) ? 'high' : 'medium',
+            purchase_price: item.purchase_price || 0,
+          }
+        })
+
+        // Try batch ROP enrichment
+        const productIds = baseItems.map(b => b.product_id)
+        if (productIds.length > 0) {
+          try {
+            const ropRes: any = await aiApi.batchRop({ product_ids: productIds })
+            const ropList: any[] = (ropRes && (ropRes.results || ropRes.items || ropRes.data)) || (Array.isArray(ropRes) ? ropRes : [])
+            const ropMap: Record<number, any> = {}
+            for (const r of ropList) {
+              if (r && r.product_id != null) ropMap[r.product_id] = r
+            }
+            for (const item of baseItems) {
+              const r = ropMap[item.product_id]
+              if (r) {
+                if (typeof r.suggested_qty === 'number') {
+                  item.suggested_qty = r.suggested_qty
+                }
+                if (typeof r.rop === 'number') item.rop = r.rop
+                if (typeof r.current_qty === 'number') item.current_qty = r.current_qty
+                if (typeof r.in_transit_qty === 'number') item.in_transit_qty = r.in_transit_qty
+                if (typeof r.backlog_qty === 'number') item.backlog_qty = r.backlog_qty
+                if (r.trend != null) item.trend = r.trend
+                if (typeof r.trend_change_pct === 'number') item.trend_change_pct = r.trend_change_pct
+                if (r.abc_class != null) item.abc_class = r.abc_class
+                if (r.demand_desc != null) item.demand_desc = r.demand_desc
+                // Cache full ROP record into store for downstream steps
+                suggestedQtys.value[item.product_id] = r
+              }
+            }
+          } catch (e) {
+            // Fallback formula already applied; just log
+            console.error('batchRop failed, using fallback formula:', e)
+          }
+        }
+
+        allProducts.value = baseItems
       } else {
         allProducts.value = []
       }
@@ -100,16 +155,39 @@ export const usePurchaseDecisionStore = defineStore('purchaseDecision', () => {
   async function getRecommendation() {
     isLoading.value = true
     try {
-      const res: any = await aiApi.chat({
-        messages: [
-          { role: 'user', content: '推荐需要补货的产品和补货量' },
-        ],
-        conversation_id: '',
-      })
-      if (res && res.blocks) {
-        aiRecommendation.value = res
+      const productIds = allProducts.value.map(p => p.product_id)
+      if (productIds.length === 0) {
+        aiSummary.value = ''
+        return
       }
-    } catch {
+      const res: any = await aiApi.replenishRecommend(productIds)
+      const data: any = (res && (res.data || res)) || {}
+      const recommendations: any[] = data.recommendations || []
+      if (recommendations.length > 0) {
+        const recMap: Record<number, any> = {}
+        for (const r of recommendations) {
+          if (r && r.product_id != null) recMap[r.product_id] = r
+        }
+        for (const p of allProducts.value) {
+          const r = recMap[p.product_id]
+          if (!r) continue
+          if (typeof r.adjusted_qty === 'number') {
+            p.suggested_qty = r.adjusted_qty
+          } else if (typeof r.baseline_qty === 'number') {
+            p.suggested_qty = r.baseline_qty
+          }
+          if (typeof r.adjustment_reason === 'string') {
+            p.aiReason = r.adjustment_reason
+          }
+          if (Array.isArray(r.adjustment_factors)) {
+            p.aiFactors = r.adjustment_factors
+          }
+        }
+      }
+      aiSummary.value = (data.summary && String(data.summary)) || ''
+      aiRecommendation.value = data
+    } catch (e) {
+      console.error('getRecommendation error:', e)
       ElMessage.warning('推荐服务暂不可用，请手动选择')
     } finally {
       isLoading.value = false
@@ -208,6 +286,7 @@ export const usePurchaseDecisionStore = defineStore('purchaseDecision', () => {
     supplierQuantities.value = {}
     inventoryKpi.value = null
     auditResult.value = null
+    aiSummary.value = ''
   }
 
   function close() {
@@ -326,7 +405,7 @@ export const usePurchaseDecisionStore = defineStore('purchaseDecision', () => {
     riskResults, supplierChoices, supplierInfo, forecastPrices, forecastQuantities,
     purchasePlan, selectedProducts, stepLabels,
     // Phase 3: 新增状态
-    suggestedQtys, supplierQuantities, inventoryKpi, auditResult,
+    suggestedQtys, supplierQuantities, inventoryKpi, auditResult, aiSummary,
     fetchLowStockProducts, getRecommendation,
     toggleProduct, selectAll, deselectAll, addToProducts, removeSelected, removeProduct, updateProduct, setQuantity,
     nextStep, prevStep, reset, close,

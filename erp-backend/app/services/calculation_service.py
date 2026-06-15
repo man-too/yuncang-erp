@@ -13,8 +13,8 @@ from sqlalchemy import func
 from app.models.product import Product, ProductCategory
 from app.models.supplier import Supplier, SupplierEvaluation
 from app.models.inventory import Inventory, InventoryRecord
-from app.models.purchase import PurchaseOrder, PurchaseOrderItem, PurchaseInbound
-from app.models.sale import SaleOrder, SaleOrderItem
+from app.models.purchase import PurchaseOrder, PurchaseOrderItem, PurchaseInbound, PurchaseOrderStatus
+from app.models.sale import SaleOrder, SaleOrderItem, SaleOrderStatus
 
 
 # ────────────────────────────────────────────
@@ -31,7 +31,7 @@ _ABC_Z = {
 
 def _classify_abc(product_id: int, db: Session) -> str:
     """简单 ABC 分类：按近 90 天出库金额在所有产品中的累计占比。
-    A: 前 80%, B: 80-95%, C: 95-100%。
+    A: 前 70%, B: 70-90%, C: 90-100%（与 batch_calc_reorder_point 保持一致）。
     无出库记录默认 C 类。
     """
     cutoff = date.today() - timedelta(days=90)
@@ -48,7 +48,7 @@ def _classify_abc(product_id: int, db: Session) -> str:
             SaleOrder.status != "cancelled",
         )
         .group_by(SaleOrderItem.product_id)
-        .order_by(func.sum(SaleOrderItem.total_price).desc())
+        .order_by(func.sum(SaleOrderItem.total_price).desc(), SaleOrderItem.product_id.asc())
         .all()
     )
 
@@ -64,9 +64,9 @@ def _classify_abc(product_id: int, db: Session) -> str:
         cumulative += (r.revenue or 0)
         if r.product_id == product_id:
             ratio = cumulative / total_revenue
-            if ratio <= 0.80:
+            if ratio <= 0.70:
                 return "A"
-            elif ratio <= 0.95:
+            elif ratio <= 0.90:
                 return "B"
             else:
                 return "C"
@@ -114,8 +114,45 @@ def calc_reorder_point(
                 if sup and sup.delivery_lead_time:
                     lead_time = sup.delivery_lead_time
 
+    # ── 当前库存（所有仓库总量）──
+    current_qty = float(
+        db.query(func.sum(Inventory.quantity))
+        .filter(Inventory.product_id == product_id)
+        .scalar() or 0
+    )
+
+    # ── 在途采购量 ──
+    in_transit_qty = float(
+        db.query(func.sum(PurchaseOrderItem.quantity - PurchaseOrderItem.received_quantity))
+        .join(PurchaseOrder, PurchaseOrderItem.order_id == PurchaseOrder.id)
+        .filter(
+            PurchaseOrderItem.product_id == product_id,
+            PurchaseOrder.status.in_([
+                PurchaseOrderStatus.APPROVED,
+                PurchaseOrderStatus.PARTIALLY_RECEIVED,
+            ]),
+        )
+        .scalar() or 0
+    )
+
+    # ── 缺货积压量（已下销售单未发货）──
+    backlog_qty = float(
+        db.query(func.sum(SaleOrderItem.quantity - SaleOrderItem.shipped_quantity))
+        .join(SaleOrder, SaleOrderItem.order_id == SaleOrder.id)
+        .filter(
+            SaleOrderItem.product_id == product_id,
+            SaleOrder.status.in_([
+                SaleOrderStatus.APPROVED,
+                SaleOrderStatus.PARTIALLY_SHIPPED,
+            ]),
+            SaleOrderItem.quantity > SaleOrderItem.shipped_quantity,
+        )
+        .scalar() or 0
+    )
+
     # ── 近 60 天日销量 ──
-    cutoff = date.today() - timedelta(days=60)
+    today = date.today()
+    cutoff = today - timedelta(days=60)
     daily_rows = (
         db.query(
             func.date(SaleOrder.order_date).label("d"),
@@ -131,18 +168,74 @@ def calc_reorder_point(
         .all()
     )
 
+    # ── 7天/30天均值 + 趋势 ──
+    seven_days_ago = today - timedelta(days=7)
+    thirty_days_ago = today - timedelta(days=30)
+    sales_7d = 0.0
+    sales_30d = 0.0
+    for r in daily_rows:
+        d = r.d
+        if isinstance(d, str):
+            try:
+                d = datetime.strptime(d, "%Y-%m-%d").date()
+            except Exception:
+                try:
+                    d = datetime.fromisoformat(d).date()
+                except Exception:
+                    continue
+        elif isinstance(d, datetime):
+            d = d.date()
+        qty = float(r.qty or 0)
+        if d >= seven_days_ago:
+            sales_7d += qty
+        if d >= thirty_days_ago:
+            sales_30d += qty
+    avg_7d = sales_7d / 7.0
+    avg_30d = sales_30d / 30.0
+
+    if avg_30d > 0:
+        change_pct = (avg_7d - avg_30d) / avg_30d * 100
+        if change_pct > 20:
+            trend = "上升"
+        elif change_pct < -20:
+            trend = "下降"
+        else:
+            trend = "平稳"
+    else:
+        change_pct = 0.0
+        trend = "平稳"
+
+    sign = "+" if change_pct >= 0 else ""
+    demand_desc = (
+        f"近30天日均{round(avg_30d, 2)}件，"
+        f"近7天日均{round(avg_7d, 2)}件，"
+        f"趋势：{trend}({sign}{round(change_pct, 1)}%)"
+    )
+
     if not daily_rows:
         # 无销量数据，返回基于 min_stock 的保守估算
+        rop_value = product.min_stock or 0
+        suggested_qty_no_sales = max(round(rop_value) - int(current_qty) - int(in_transit_qty), 0)
         return {
             "product_id": product_id,
             "product_name": product.name,
-            "rop": product.min_stock or 0,
+            "rop": rop_value,
             "avg_daily_sales": 0.0,
             "lead_time": lead_time,
             "safety_stock": product.min_stock or 0,
             "service_level": "85%",
             "abc_class": "C",
             "warning": "近60天无销量数据，使用 min_stock 作为保守值",
+            # 新增字段（P0 状态快照）
+            "current_qty": current_qty,
+            "in_transit_qty": in_transit_qty,
+            "backlog_qty": backlog_qty,
+            "avg_daily_sales_30d": round(avg_30d, 2),
+            "avg_daily_sales_7d": round(avg_7d, 2),
+            "trend": trend,
+            "trend_change_pct": round(change_pct, 1),
+            "demand_desc": demand_desc,
+            "suggested_qty": suggested_qty_no_sales,
         }
 
     quantities = [float(r.qty or 0) for r in daily_rows]
@@ -165,6 +258,7 @@ def calc_reorder_point(
 
     safety_stock = z * std_daily * math.sqrt(lead_time)
     rop = avg_daily * lead_time + safety_stock
+    suggested_qty = max(round(rop) - int(current_qty) - int(in_transit_qty), 0)
 
     return {
         "product_id": product_id,
@@ -175,6 +269,16 @@ def calc_reorder_point(
         "safety_stock": round(safety_stock, 2),
         "service_level": {"A": "95%", "B": "90%", "C": "85%"}[abc],
         "abc_class": abc,
+        # 新增字段（P0 状态快照）
+        "current_qty": current_qty,
+        "in_transit_qty": in_transit_qty,
+        "backlog_qty": backlog_qty,
+        "avg_daily_sales_30d": round(avg_30d, 2),
+        "avg_daily_sales_7d": round(avg_7d, 2),
+        "trend": trend,
+        "trend_change_pct": round(change_pct, 1),
+        "demand_desc": demand_desc,
+        "suggested_qty": suggested_qty,
     }
 
 
@@ -278,8 +382,9 @@ def batch_calc_reorder_point(
     """批量计算再订货点 (ROP)，避免逐个查询的开销"""
     from app.models.product import Product
     from app.models.supplier import Supplier
-    from app.models.purchase import PurchaseOrder, PurchaseOrderItem
-    from app.models.sale import SaleOrder, SaleOrderItem
+    from app.models.purchase import PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus
+    from app.models.sale import SaleOrder, SaleOrderItem, SaleOrderStatus
+    from app.models.inventory import Inventory
 
     if not product_ids:
         return {}
@@ -314,8 +419,60 @@ def batch_calc_reorder_point(
     for pid in product_ids:
         lead_time_map.setdefault(pid, 7)
 
+    # ── 当前库存（按产品聚合所有仓库）──
+    inv_rows = (
+        db.query(
+            Inventory.product_id,
+            func.sum(Inventory.quantity).label("total"),
+        )
+        .filter(Inventory.product_id.in_(product_ids))
+        .group_by(Inventory.product_id)
+        .all()
+    )
+    inv_map: dict[int, float] = {pid: float(total or 0) for pid, total in inv_rows}
+
+    # ── 在途采购量（批量）──
+    in_transit_rows = (
+        db.query(
+            PurchaseOrderItem.product_id,
+            func.sum(PurchaseOrderItem.quantity - PurchaseOrderItem.received_quantity).label("qty"),
+        )
+        .join(PurchaseOrder, PurchaseOrderItem.order_id == PurchaseOrder.id)
+        .filter(
+            PurchaseOrderItem.product_id.in_(product_ids),
+            PurchaseOrder.status.in_([
+                PurchaseOrderStatus.APPROVED,
+                PurchaseOrderStatus.PARTIALLY_RECEIVED,
+            ]),
+        )
+        .group_by(PurchaseOrderItem.product_id)
+        .all()
+    )
+    in_transit_map: dict[int, float] = {pid: float(qty or 0) for pid, qty in in_transit_rows}
+
+    # ── 缺货积压量（批量）──
+    backlog_rows = (
+        db.query(
+            SaleOrderItem.product_id,
+            func.sum(SaleOrderItem.quantity - SaleOrderItem.shipped_quantity).label("qty"),
+        )
+        .join(SaleOrder, SaleOrderItem.order_id == SaleOrder.id)
+        .filter(
+            SaleOrderItem.product_id.in_(product_ids),
+            SaleOrder.status.in_([
+                SaleOrderStatus.APPROVED,
+                SaleOrderStatus.PARTIALLY_SHIPPED,
+            ]),
+            SaleOrderItem.quantity > SaleOrderItem.shipped_quantity,
+        )
+        .group_by(SaleOrderItem.product_id)
+        .all()
+    )
+    backlog_map: dict[int, float] = {pid: float(qty or 0) for pid, qty in backlog_rows}
+
     # ── 近 60 天日销量 ──
-    cutoff = date.today() - timedelta(days=60)
+    today = date.today()
+    cutoff = today - timedelta(days=60)
     daily_rows = (
         db.query(
             SaleOrderItem.product_id,
@@ -332,16 +489,62 @@ def batch_calc_reorder_point(
         .all()
     )
 
-    # 按 product_id 聚合销量
+    # 按 product_id 聚合销量 + 切割 7d/30d
     sales_map: dict[int, list[float]] = {}
-    for pid, _, qty in daily_rows:
-        sales_map.setdefault(pid, []).append(float(qty or 0))
+    sales_7d_map: dict[int, float] = {}
+    sales_30d_map: dict[int, float] = {}
+    seven_days_ago = today - timedelta(days=7)
+    thirty_days_ago = today - timedelta(days=30)
+    for pid, d, qty in daily_rows:
+        if isinstance(d, str):
+            try:
+                d = datetime.strptime(d, "%Y-%m-%d").date()
+            except Exception:
+                try:
+                    d = datetime.fromisoformat(d).date()
+                except Exception:
+                    continue
+        elif isinstance(d, datetime):
+            d = d.date()
+        qf = float(qty or 0)
+        sales_map.setdefault(pid, []).append(qf)
+        if d >= seven_days_ago:
+            sales_7d_map[pid] = sales_7d_map.get(pid, 0.0) + qf
+        if d >= thirty_days_ago:
+            sales_30d_map[pid] = sales_30d_map.get(pid, 0.0) + qf
 
-    # ── ABC 分类 ──
-    def _abc(pid: int) -> str:
-        return "C"  # 简化处理，默认C类
+    # ── ABC 分类（按近90天销售额累计占比）──
+    cutoff_90 = today - timedelta(days=90)
+    revenue_rows = (
+        db.query(
+            SaleOrderItem.product_id,
+            func.sum(SaleOrderItem.total_price).label("rev"),
+        )
+        .join(SaleOrder, SaleOrderItem.order_id == SaleOrder.id)
+        .filter(
+            SaleOrder.order_date >= cutoff_90,
+            SaleOrder.status != "cancelled",
+        )
+        .group_by(SaleOrderItem.product_id)
+        .order_by(func.sum(SaleOrderItem.total_price).desc(), SaleOrderItem.product_id.asc())
+        .all()
+    )
+    total_rev = sum(float(r.rev or 0) for r in revenue_rows)
+    abc_map: dict[int, str] = {}
+    if total_rev > 0:
+        cum = 0.0
+        for row in revenue_rows:
+            cum += float(row.rev or 0)
+            ratio = cum / total_rev
+            if ratio <= 0.70:
+                abc_map[row.product_id] = "A"
+            elif ratio <= 0.90:
+                abc_map[row.product_id] = "B"
+            else:
+                abc_map[row.product_id] = "C"
 
     _ABC_Z_BATCH = {"A": 1.65, "B": 1.28, "C": 1.04}
+    _ABC_SERVICE = {"A": "95%", "B": "90%", "C": "85%"}
 
     result: dict[int, dict] = {}
     for pid in product_ids:
@@ -349,42 +552,77 @@ def batch_calc_reorder_point(
         if not prod:
             continue
         lt = lead_time_map.get(pid, 7)
-        quantities = sales_map.get(pid, [])
-        if not quantities:
-            result[pid] = {
-                "product_id": pid,
-                "product_name": prod.name,
-                "rop": prod.min_stock or 0,
-                "avg_daily_sales": 0.0,
-                "lead_time": lt,
-                "safety_stock": prod.min_stock or 0,
-                "abc_class": "C",
-            }
-            continue
+        current_qty = inv_map.get(pid, 0.0)
+        in_transit_qty = in_transit_map.get(pid, 0.0)
+        backlog_qty = backlog_map.get(pid, 0.0)
+        avg_7d = sales_7d_map.get(pid, 0.0) / 7.0
+        avg_30d = sales_30d_map.get(pid, 0.0) / 30.0
 
-        sum_q = sum(quantities)
-        k = len(quantities)
-        avg_daily = sum_q / 60
-        if k >= 2 and avg_daily > 0:
-            ssd = sum((q - avg_daily) ** 2 for q in quantities)
-            ssd += (60 - k) * (avg_daily ** 2)
-            std_daily = math.sqrt(ssd / 60)
+        if avg_30d > 0:
+            change_pct = (avg_7d - avg_30d) / avg_30d * 100
+            if change_pct > 20:
+                trend = "上升"
+            elif change_pct < -20:
+                trend = "下降"
+            else:
+                trend = "平稳"
         else:
-            std_daily = avg_daily * 0.3 if avg_daily > 0 else 0.0
+            change_pct = 0.0
+            trend = "平稳"
 
-        abc = _abc(pid)
-        z = _ABC_Z_BATCH.get(abc, 1.04)
-        safety_stock = z * std_daily * math.sqrt(lt)
-        rop = avg_daily * lt + safety_stock
+        sign = "+" if change_pct >= 0 else ""
+        demand_desc = (
+            f"近30天日均{round(avg_30d, 2)}件，"
+            f"近7天日均{round(avg_7d, 2)}件，"
+            f"趋势：{trend}({sign}{round(change_pct, 1)}%)"
+        )
 
-        result[pid] = {
+        quantities = sales_map.get(pid, [])
+        abc = abc_map.get(pid, "C")
+
+        if not quantities:
+            rop_val = prod.min_stock or 0
+            safety_stock = prod.min_stock or 0
+            avg_daily = 0.0
+        else:
+            sum_q = sum(quantities)
+            k = len(quantities)
+            avg_daily = sum_q / 60
+            if k >= 2 and avg_daily > 0:
+                ssd = sum((q - avg_daily) ** 2 for q in quantities)
+                ssd += (60 - k) * (avg_daily ** 2)
+                std_daily = math.sqrt(ssd / 60)
+            else:
+                std_daily = avg_daily * 0.3 if avg_daily > 0 else 0.0
+
+            z = _ABC_Z_BATCH.get(abc, 1.04)
+            safety_stock = z * std_daily * math.sqrt(lt)
+            rop_val = avg_daily * lt + safety_stock
+
+        suggested_qty = max(round(rop_val) - int(current_qty) - int(in_transit_qty), 0)
+
+        entry = {
             "product_id": pid,
             "product_name": prod.name,
-            "rop": round(rop, 2),
+            "rop": round(rop_val, 2),
             "avg_daily_sales": round(avg_daily, 2),
             "lead_time": lt,
             "safety_stock": round(safety_stock, 2),
+            "service_level": _ABC_SERVICE.get(abc, "85%"),
             "abc_class": abc,
+            # 新增字段（P0 状态快照）
+            "current_qty": current_qty,
+            "in_transit_qty": in_transit_qty,
+            "backlog_qty": backlog_qty,
+            "avg_daily_sales_30d": round(avg_30d, 2),
+            "avg_daily_sales_7d": round(avg_7d, 2),
+            "trend": trend,
+            "trend_change_pct": round(change_pct, 1),
+            "demand_desc": demand_desc,
+            "suggested_qty": suggested_qty,
         }
+        if not quantities:
+            entry["warning"] = "近60天无销量数据，使用 min_stock 作为保守值"
+        result[pid] = entry
 
     return result

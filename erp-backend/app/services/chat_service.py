@@ -31,7 +31,7 @@ ACTION_KW = ["下单", "创建订单", "调拨", "创建调拨"]
 DATA_KW = [
     "销售", "库存", "供应商", "产品", "商品", "订单", "采购", "出库", "入库",
     "预测", "数据", "统计", "报表", "预警", "风险", "利润", "成本", "金额",
-    "销量", "数量", "热销", "卖", "天气",
+    "销量", "数量", "热销", "卖", "天气", "补货", "推荐补货", "供应商推荐",
 ]
 
 
@@ -64,6 +64,29 @@ def _infer_chart_flag(tool_calls: list) -> bool:
     return False
 
 
+def _strategy_hints_for_tools(tool_calls: list) -> list[str]:
+    """根据本轮调用的工具名，返回需要注入到 ANALYSIS 阶段的策略提示。
+
+    - recommend_restock / 任何包含 'restock'/'replenish'/'reorder' 的工具 → 补货策略
+    - recommend_supplier / 任何包含 'supplier' 的工具 → 供应商策略
+    """
+    hints: list[str] = []
+    seen_replenish = False
+    seen_supplier = False
+    for tc in tool_calls or []:
+        name = tc.function.name if hasattr(tc, "function") else tc.get("function", {}).get("name", "")
+        if not name:
+            continue
+        lname = name.lower()
+        if not seen_replenish and any(k in lname for k in ("restock", "replenish", "reorder")):
+            hints.append(REPLENISHMENT_STRATEGY_HINT)
+            seen_replenish = True
+        if not seen_supplier and "supplier" in lname:
+            hints.append(SUPPLIER_STRATEGY_HINT)
+            seen_supplier = True
+    return hints
+
+
 # ═══════════════════════════════════════════════════════════════
 # Prompt constants — Layer 1 routing + Layer 2 analysis
 # ═══════════════════════════════════════════════════════════════
@@ -94,6 +117,23 @@ ANALYSIS_HINT_RENDER = "图表/表格数据已直接发送到前端展示，你�
 DATA_HINT = "用户问的是业务数据问题，必须调用工具获取真实数据，不能凭空回答。用户要图时直接调 render_*（不要先调 query_* 查数据），只要数据时用 query_* + calc_*。"
 
 RETRY_HINT = "警告：你刚才没有调用任何工具就直接回答了。用户问的是业务数据，你必须调用工具查询真实数据库，不能凭空回答。现在请重新调用合适的工具来获取数据。"
+
+# ── 补货决策场景的策略注入（供参考，不强制遵循）──
+REPLENISHMENT_STRATEGY_HINT = """补货决策法则（供参考，根据实际情况灵活判断）：
+1. 再订货点 ROP = 日均需求 × 提前期 + 安全库存 — 工具已计算，重点看 current_qty 与 ROP 的差距
+2. 补货量 ≈ ROP - current_qty - in_transit_qty，工具已算出 suggested_qty 字段，可直接引用
+3. 趋势(trend)上升且变化幅度>20% → 在 suggested_qty 基础上上调 10-30%
+4. 趋势下降且变化幅度>20% → 在 suggested_qty 基础上下调 10-30%
+5. abc_class 为 C 类 + 趋势平稳 → 维持基线，不需要上调
+6. backlog_qty > 0 表示有未发货积压，应纳入紧急度判断
+分析时优先引用 demand_desc / rop / suggested_qty / trend 字段，不要自己重算公式。"""
+
+# ── 供应商选择场景的策略注入 ──
+SUPPLIER_STRATEGY_HINT = """供应商选择优先级（工具已按 urgency 给出动态权重，weights_used 字段可见）：
+- urgent (缺货)：交付准时率为王，价格次要
+- very_high / high：偏向交付，质量与价格平衡
+- normal：性价比优先，质量与价格并重
+关注 total_score、is_single_source、suggested_share 三个字段做排序与建议；单源依赖供应商需提示开发备选。"""
 
 # ═══════════════════════════════════════════════════════════════
 # OpenAI client
@@ -578,6 +618,9 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
             })
         if direct_blocks:
             analysis_messages.append({"role": "system", "content": ANALYSIS_HINT_RENDER})
+        # 注入场景化策略提示（补货 / 供应商）
+        for hint in _strategy_hints_for_tools(msg.tool_calls):
+            analysis_messages.append({"role": "system", "content": hint})
 
         try:
             resp2 = client.chat.completions.create(
@@ -694,6 +737,9 @@ def _handle_tool_calls_stream(msg, full_messages, db, creator_id, intent: Intent
         })
     if direct_blocks:
         analysis_messages.append({"role": "system", "content": ANALYSIS_HINT_RENDER})
+    # 注入场景化策略提示（补货 / 供应商）
+    for hint in _strategy_hints_for_tools(msg.tool_calls):
+        analysis_messages.append({"role": "system", "content": hint})
 
     try:
         stream = client.chat.completions.create(

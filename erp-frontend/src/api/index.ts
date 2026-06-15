@@ -155,6 +155,9 @@ export const aiApi = {
   suggestedQty: (data: { product_id: number; supplier_id?: number }) => http.post('/ai/suggested-qty', null, { params: data }),
   /** 批量 ROP 计算 */
   batchRop: (data: { product_ids: number[] }) => http.post('/ai/batch-rop', data),
+  /** 补货量结构化推荐：ROP 基线 + AI 因素修正 */
+  replenishRecommend: (productIds: number[]) =>
+    http.post('/ai/replenish-recommend', { product_ids: productIds }),
   /** 供应商综合评分 */
   supplierScore: (data?: { supplier_ids?: number[] }) => http.post('/ai/supplier-score', data),
   /** 天气查询 */

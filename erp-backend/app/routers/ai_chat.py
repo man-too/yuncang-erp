@@ -499,6 +499,178 @@ def ai_supplier_score(
     return {"suppliers": calc_supplier_score(None, db)}
 
 
+@router.post("/replenish-recommend")
+def ai_replenish_recommend(
+    data: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """补货量结构化推荐：ROP 基线 + AI 因素修正
+
+    Input: {"product_ids": [int, ...]}
+    Output: {"recommendations": [...], "summary": str}
+    """
+    import re
+    from app.services.calculation_service import batch_calc_reorder_point
+
+    product_ids = data.get("product_ids") if isinstance(data, dict) else None
+    if not isinstance(product_ids, list) or not product_ids:
+        raise HTTPException(status_code=400, detail="product_ids 不能为空")
+
+    # 校验 list of ints
+    try:
+        product_ids = [int(p) for p in product_ids]
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="product_ids 必须是整数列表")
+
+    # 1. 批量 ROP 基线
+    baseline_map = batch_calc_reorder_point(product_ids, db) or {}
+
+    if not baseline_map:
+        return {"recommendations": [], "summary": "未找到对应产品数据"}
+
+    # 2. 构造每个产品的基线项
+    def _baseline_item(pid: int, base: dict, reason: str, factors: list) -> dict:
+        baseline_qty = int(base.get("suggested_qty", 0) or 0)
+        return {
+            "product_id": pid,
+            "product_name": base.get("product_name", ""),
+            "baseline_qty": baseline_qty,
+            "adjusted_qty": baseline_qty,
+            "rop": float(base.get("rop", 0) or 0),
+            "current_qty": float(base.get("current_qty", 0) or 0),
+            "in_transit_qty": float(base.get("in_transit_qty", 0) or 0),
+            "backlog_qty": float(base.get("backlog_qty", 0) or 0),
+            "trend": base.get("trend", "平稳"),
+            "trend_change_pct": float(base.get("trend_change_pct", 0) or 0),
+            "abc_class": base.get("abc_class", "C"),
+            "demand_desc": base.get("demand_desc", ""),
+            "adjustment_reason": reason,
+            "adjustment_factors": factors,
+        }
+
+    # 3. LLM 不可用 → 返回基线
+    from app.config import settings as _settings
+    if not _settings.OPENAI_API_KEY:
+        recommendations = [
+            _baseline_item(pid, baseline_map[pid], "LLM 不可用，使用 ROP 基线", [])
+            for pid in product_ids if pid in baseline_map
+        ]
+        return {
+            "recommendations": recommendations,
+            "summary": "AI 服务未配置，已返回 ROP 基线建议量。",
+        }
+
+    # 4. 构造 AI 提示词
+    table_lines = [
+        "产品ID | 产品名 | 当前库存 | ROP | 建议(基线) | 趋势 | 趋势变化% | ABC"
+    ]
+    for pid in product_ids:
+        b = baseline_map.get(pid)
+        if not b:
+            continue
+        table_lines.append(
+            f"{pid} | {b.get('product_name','')} | "
+            f"{b.get('current_qty',0)} | {b.get('rop',0)} | "
+            f"{b.get('suggested_qty',0)} | {b.get('trend','平稳')} | "
+            f"{b.get('trend_change_pct',0)}% | {b.get('abc_class','C')}"
+        )
+    table_text = "\n".join(table_lines)
+
+    prompt = (
+        "你是供应链补货决策专家。基于 ROP 基线数据，根据下列规则对每个产品给出最终建议补货量。\n\n"
+        "【产品数据】\n"
+        f"{table_text}\n\n"
+        "【调整规则】\n"
+        "- 趋势\"上升\"且 |trend_change_pct| > 20 → 在基线基础上上调 10%-30%\n"
+        "- 趋势\"下降\"且 |trend_change_pct| > 20 → 在基线基础上下调 10%-30%\n"
+        "- 缺货 (current_qty == 0) → 优先补足，可超过基线\n"
+        "- C 类产品趋势平稳 → 维持基线\n"
+        "- 其他情况：维持基线\n\n"
+        "【输出格式 - 严格遵守】\n"
+        "对每个产品输出一行（不要换行打断）：\n"
+        "[PID:产品ID|QTY:最终建议数量整数|REASON:中文调整理由不超过30字|FACTORS:因素1,因素2]\n\n"
+        "示例：\n"
+        "[PID:1|QTY:72|REASON:需求上升40%，上调20%|FACTORS:趋势上升,A类]\n"
+        "[PID:2|QTY:40|REASON:维持基线，稳定|FACTORS:稳定,B类]\n\n"
+        "在所有产品标签输出之后，可附加一行总结性文字（可选，不要再用 [] 包裹）。"
+    )
+
+    # 5. 调用 LLM
+    ai_text = ""
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=_settings.OPENAI_API_KEY, base_url=_settings.AI_BASE_URL)
+        resp = client.chat.completions.create(
+            model=_settings.OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": "你是补货决策专家，严格按要求格式输出。"},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
+            max_tokens=1024,
+            extra_body={"thinking": {"type": "disabled"}},
+        )
+        ai_text = resp.choices[0].message.content or ""
+        logger.info(f"[ReplenishRecommend] LLM token: {resp.usage} | 长度={len(ai_text)}")
+    except Exception as e:
+        logger.warning(f"[ReplenishRecommend] LLM 调用失败: {e}")
+        recommendations = [
+            _baseline_item(pid, baseline_map[pid], "LLM 不可用，使用 ROP 基线", [])
+            for pid in product_ids if pid in baseline_map
+        ]
+        return {
+            "recommendations": recommendations,
+            "summary": "AI 调用失败，已返回 ROP 基线建议量。",
+        }
+
+    # 6. 解析 [PID:N|QTY:M|REASON:...|FACTORS:...]
+    tag_pattern = re.compile(
+        r'\[PID:(\d+)\|QTY:(-?\d+)\|REASON:([^|\]]*)\|FACTORS:([^\]]*)\]'
+    )
+    parsed_map: dict[int, dict] = {}
+    for m in tag_pattern.finditer(ai_text):
+        try:
+            pid = int(m.group(1))
+            qty = int(m.group(2))
+            reason = m.group(3).strip()
+            factors_raw = m.group(4).strip()
+            factors = [f.strip() for f in factors_raw.split(",") if f.strip()] if factors_raw else []
+            parsed_map[pid] = {"qty": max(qty, 0), "reason": reason, "factors": factors}
+        except Exception:
+            continue
+
+    # 7. 提取 summary —— 标签之后的非标签文字
+    summary = ""
+    summary_text = tag_pattern.sub("", ai_text).strip()
+    if summary_text:
+        summary = summary_text.splitlines()[-1].strip() if summary_text else ""
+        if len(summary_text) <= 200:
+            summary = summary_text
+
+    # 8. 合并：解析到的覆盖基线，未解析到的回退基线
+    recommendations = []
+    for pid in product_ids:
+        base = baseline_map.get(pid)
+        if not base:
+            continue
+        baseline_qty = int(base.get("suggested_qty", 0) or 0)
+        if pid in parsed_map:
+            ai_item = parsed_map[pid]
+            item = _baseline_item(pid, base, ai_item["reason"] or "AI 已分析", ai_item["factors"])
+            item["adjusted_qty"] = ai_item["qty"]
+            recommendations.append(item)
+        else:
+            recommendations.append(
+                _baseline_item(pid, base, "AI 未返回此产品建议，使用 ROP 基线", [])
+            )
+
+    if not summary:
+        summary = f"已对 {len(recommendations)} 个产品给出补货建议。"
+
+    return {"recommendations": recommendations, "summary": summary}
+
+
 @router.get("/weather")
 def ai_weather(
     city: str = "上海",

@@ -14,17 +14,21 @@ from sqlalchemy import func
 from app.models.supplier import Supplier, SupplierEvaluation, SupplierMetrics
 from app.models.purchase import PurchaseOrder, PurchaseOrderItem, PurchaseInbound
 from app.models.product import Product
+from app.models.inventory import Inventory
 
 
 # ────────────────────────────────────────────
 # 权重配置
 # ────────────────────────────────────────────
-WEIGHTS = {
-    "quality": 0.30,
-    "delivery": 0.25,
-    "price": 0.20,
-    "service": 0.15,
+# 按补货紧急程度选择四维权重，每行总和保持 0.90（留 0.10 给 risk_penalty）
+URGENCY_WEIGHTS = {
+    "urgent":    {"quality": 0.10, "delivery": 0.50, "price": 0.20, "service": 0.10},  # 缺货：交付为王
+    "very_high": {"quality": 0.18, "delivery": 0.35, "price": 0.22, "service": 0.15},  # 严重不足：偏交付
+    "high":      {"quality": 0.27, "delivery": 0.27, "price": 0.18, "service": 0.18},  # 偏低：均衡偏交付
+    "normal":    {"quality": 0.30, "delivery": 0.20, "price": 0.25, "service": 0.15},  # 正常：性价比优先
 }
+# 保留旧 WEIGHTS 作为默认（normal 别名），避免破坏可能存在的外部引用
+WEIGHTS = URGENCY_WEIGHTS["normal"]
 RISK_PENALTY_WEIGHT = 0.10  # 风险惩罚上限占比
 
 # 单源依赖：如果某产品只有一家供应商，该供应商扣分
@@ -38,33 +42,74 @@ DELAY_STD_PENALTY_PER_STD = 2.0  # 每超 1 个标准差扣 2 分
 def calc_supplier_score(
     supplier_id: int | None = None,
     db: Session | None = None,
+    urgency: str | None = None,
+    product_id: int | None = None,
 ) -> dict | list[dict]:
     """计算供应商评分
 
     传入 supplier_id 计算单个；不传则计算全部。
+    urgency: "urgent" / "very_high" / "high" / "normal"，控制四维权重分布。
+    product_id: 用于自动推导 urgency（基于该产品当前库存 vs min_stock）。
     """
     if db is None:
         return {"error": "db session required"}
 
     if supplier_id:
-        return _score_one(supplier_id, db)
+        return _score_one(supplier_id, db, urgency=urgency, product_id=product_id)
 
     # 批量计算
     suppliers = db.query(Supplier).filter(Supplier.status == "active").all()
     results = []
     for s in suppliers:
         try:
-            results.append(_score_one(s.id, db))
+            results.append(_score_one(s.id, db, urgency=urgency, product_id=product_id))
         except Exception:
             continue
     results.sort(key=lambda x: x.get("total_score", 0), reverse=True)
     return results
 
 
-def _score_one(supplier_id: int, db: Session) -> dict:
+def _derive_urgency(product_id: int, db: Session) -> str:
+    """根据产品当前库存（所有仓库求和）vs min_stock 推导紧急程度"""
+    product = db.get(Product, product_id)
+    if not product:
+        return "normal"
+    min_stock = product.min_stock or 0
+    current_qty = (
+        db.query(func.coalesce(func.sum(Inventory.quantity), 0))
+        .filter(Inventory.product_id == product_id)
+        .scalar()
+    ) or 0
+
+    if min_stock <= 0:
+        return "normal"
+    if current_qty == 0:
+        return "urgent"
+    if current_qty < min_stock * 0.5:
+        return "very_high"
+    if current_qty < min_stock:
+        return "high"
+    return "normal"
+
+
+def _score_one(
+    supplier_id: int,
+    db: Session,
+    urgency: str | None = None,
+    product_id: int | None = None,
+) -> dict:
     supplier = db.get(Supplier, supplier_id)
     if not supplier:
         return {"error": f"供应商 {supplier_id} 不存在"}
+
+    # ── 推导 urgency ──
+    if urgency is None:
+        if product_id is not None:
+            urgency = _derive_urgency(product_id, db)
+        else:
+            urgency = "normal"
+
+    weights = URGENCY_WEIGHTS.get(urgency, URGENCY_WEIGHTS["normal"])
 
     # ── 最近一次评估 ──
     latest_eval = (
@@ -83,10 +128,10 @@ def _score_one(supplier_id: int, db: Session) -> dict:
         quality = delivery = price = service = 0
 
     base_score = (
-        quality * WEIGHTS["quality"]
-        + delivery * WEIGHTS["delivery"]
-        + price * WEIGHTS["price"]
-        + service * WEIGHTS["service"]
+        quality * weights["quality"]
+        + delivery * weights["delivery"]
+        + price * weights["price"]
+        + service * weights["service"]
     )
 
     # ── 风险惩罚 ──
@@ -119,6 +164,8 @@ def _score_one(supplier_id: int, db: Session) -> dict:
         "total_score": round(total_score, 2),
         "is_single_source": is_single_source,
         "suggested_share": suggested_share,
+        "urgency": urgency,
+        "weights_used": dict(weights),
     }
 
 
