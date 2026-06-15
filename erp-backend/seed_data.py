@@ -2,12 +2,15 @@
 import sys
 sys.path.insert(0, '.')
 
+from datetime import date, timedelta
+import random
+
 from app.database import SessionLocal, engine, Base
 from app.models.user import User
 from app.models.supplier import Supplier
 from app.models.product import Product, ProductCategory
 from app.models.purchase import PurchaseOrder, PurchaseOrderItem
-from app.models.sale import Customer
+from app.models.sale import Customer, SaleOrder, SaleOrderItem, SaleOutbound
 from app.models.inventory import Warehouse, Inventory
 from app.utils.auth import hash_password
 
@@ -79,6 +82,74 @@ db.add(po); db.flush()
 db.add(PurchaseOrderItem(order_id=po.id, product_id=prods[0].id, quantity=20, unit_price=3500, total_price=70000))
 db.add(PurchaseOrderItem(order_id=po.id, product_id=prods[2].id, quantity=3, unit_price=15000, total_price=45000))
 
+# 9. 销售订单（6个月历史数据，确保图表有数据）
+random.seed(42)
+so_idx = 1
+start_date = date(2026, 1, 5)
+end_date = date(2026, 6, 10)
+current = start_date
+
+# 每个产品的月度销量范围 (product_index: (min_qty, max_qty) per order)
+product_sales_config = {
+    0: (5, 15),    # 钢材A型
+    1: (50, 200),  # 塑料粒子
+    2: (1, 4),     # 机械臂基础版
+    3: (20, 80),   # 传感器模组
+    4: (30, 100),  # 电路板V2
+    5: (50, 200),  # 标准包装箱
+}
+
+while current <= end_date:
+    # 每周1-3个订单
+    orders_this_week = random.randint(1, 3)
+    for _ in range(orders_this_week):
+        cust = random.choice(custs)
+        order_date = current + timedelta(days=random.randint(0, 6))
+        if order_date > end_date:
+            break
+
+        # 每个订单1-3个产品
+        num_items = random.randint(1, 3)
+        selected_prods = random.sample(range(len(prods)), min(num_items, len(prods)))
+
+        items_data = []
+        total = 0.0
+        for pi in selected_prods:
+            p = prods[pi]
+            min_q, max_q = product_sales_config[pi]
+            qty = random.randint(min_q, max_q)
+            unit_p = p.sale_price
+            line_total = qty * unit_p
+            total += line_total
+            items_data.append((p, qty, unit_p, line_total))
+
+        status = random.choice(['completed', 'completed', 'completed', 'approved', 'approved'])
+        so = SaleOrder(
+            order_no=f'SO{order_date.strftime("%Y%m%d")}{so_idx:03d}',
+            customer_id=cust.id,
+            status=status,
+            order_date=order_date,
+            total_amount=total,
+            creator_id=1,
+        )
+        db.add(so)
+        db.flush()
+
+        for p, qty, unit_p, line_total in items_data:
+            shipped = qty if status == 'completed' else 0
+            db.add(SaleOrderItem(
+                order_id=so.id,
+                product_id=p.id,
+                quantity=qty,
+                shipped_quantity=shipped,
+                unit_price=unit_p,
+                total_price=line_total,
+            ))
+
+        so_idx += 1
+
+    current += timedelta(days=7)
+
 db.commit()
 for inv in db.query(Inventory).all():
     inv.available_quantity = inv.quantity - inv.locked_quantity
@@ -86,5 +157,5 @@ db.commit()
 
 print('测试数据初始化完成！')
 print('管理员: admin / admin123')
-print('已创建: 4个供应商, 6个产品, 3个客户, 2个仓库, 库存数据, 1个采购订单')
+print('已创建: 4个供应商, 6个产品, 3个客户, 2个仓库, 库存数据, 1个采购订单, ~120个销售订单(6个月)')
 db.close()

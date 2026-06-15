@@ -319,30 +319,89 @@ def _condense_render(result: dict) -> dict:
 # 4. build_blocks functions — 构建前端渲染块
 # ═══════════════════════════════════════════════════════════════════════
 
+_FIELD_LABELS: dict[str, str] = {
+    # 通用
+    "id": "ID", "code": "编码", "name": "名称", "status": "状态",
+    "unit": "单位", "category": "分类", "item": "项目", "date": "日期",
+    "quantity": "数量", "amount": "金额", "total": "合计",
+    "suggestion": "建议", "confidence": "置信度", "reason": "原因",
+    "warning": "警告", "score": "评分", "summary": "摘要",
+    "action": "操作", "city": "城市",
+    # 产品
+    "product_id": "产品ID", "product_name": "产品", "product_code": "产品编码",
+    "category_id": "分类ID", "purchase_price": "采购价", "sale_price": "销售价",
+    "is_active": "启用",
+    # 仓库/库存
+    "warehouse_id": "仓库ID", "warehouse_name": "仓库", "warehouse": "仓库",
+    "current_qty": "当前库存", "min_stock": "安全库存", "max_stock": "最大库存",
+    "daily_sales": "日均销量", "days_support": "可支撑天数",
+    "alert_level": "预警等级", "suggested_action": "建议操作",
+    "suggested_order_qty": "建议补货量", "suggested_qty": "建议补货量",
+    "daily_sales_avg": "日均销量", "priority": "优先级",
+    "rop": "再订货点(ROP)", "safety_stock": "安全库存",
+    "avg_daily_sales": "日均销量", "lead_time": "交货期(天)",
+    "service_level": "服务水平", "abc_class": "ABC分类",
+    "turnover_days": "周转天数", "dead_stock_count": "呆滞SKU数",
+    "dead_stock_pct": "呆滞占比", "capital_occupied": "占用资金",
+    # 供应商
+    "supplier_id": "供应商ID", "supplier_name": "供应商",
+    "contact_person": "联系人", "phone": "电话", "rating": "评分",
+    "delivery_lead_time": "交货期(天)", "lead_time_days": "交货期(天)",
+    "avg_quality_score": "质量评分", "avg_delivery_score": "交付评分",
+    "avg_price_score": "价格评分", "avg_service_score": "服务评分",
+    "avg_total_score": "综合评分", "total_orders": "总订单数",
+    "completed_orders": "已完成订单", "completion_rate": "完成率",
+    "ai_score": "AI评分", "total_score": "综合评分",
+    "strengths": "优势", "weaknesses": "劣势",
+    "quality_score": "质量评分", "delivery_score": "交付评分",
+    "price_score": "价格评分", "service_score": "服务评分",
+    "past_orders": "历史订单数", "is_single_source": "单一来源",
+    "stock_risk": "库存风险", "supplier_risk": "供应商风险",
+    "quality": "质量", "delivery": "交付", "price": "价格", "service": "服务",
+    "base_score": "基础分", "risk_penalty": "风险扣分",
+    "single_source_penalty": "单一来源扣分", "delay_std_penalty": "交期波动扣分",
+    "suggested_share": "建议份额",
+    # 销售
+    "total_quantity": "总数量", "total_amount": "总金额", "days": "天数",
+    "forecast_next_30d": "30天预测", "predictions": "预测值",
+    "prediction_dates": "预测日期", "trend": "趋势",
+    "seasonal_factor": "季节因子",
+    # 风险/天气
+    "probability": "概率", "impact": "影响", "mitigability": "可缓解度",
+    "weather_summary": "天气摘要", "kpi": "KPI", "overall_risk": "整体风险",
+    "temp_high": "最高温", "temp_low": "最低温", "weather": "天气",
+    "weather_code": "天气代码", "precip_prob": "降水概率",
+    "matched_weather_types": "匹配天气类型",
+}
+
+
 def _query_result_to_table(result: dict) -> list[dict]:
     """通用查询结果 → table block
 
-    支持 items / suppliers / products / recommendations / risk_items 等列表键
+    支持 items / suppliers / products / recommendations / risk_items / rankings / risk_matrix / forecast 等列表键
     """
-    # 尝试识别列表键
-    list_key = None
+    # 尝试识别列表键（按优先级）
     list_data = None
-    for key in ("items", "suppliers", "products", "recommendations", "risk_items"):
-        if key in result and isinstance(result[key], list):
-            list_key = key
+    for key in ("items", "suppliers", "products", "recommendations", "risk_items",
+                "rankings", "risk_matrix", "forecast", "history", "supplier_data",
+                "product_risks", "affected_products"):
+        if key in result and isinstance(result[key], list) and result[key]:
             list_data = result[key]
             break
+
+    # 兜底：遍历所有值找第一个非空列表
+    if not list_data:
+        for v in result.values():
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                list_data = v
+                break
 
     if not list_data:
         return [{"type": "table", "columns": [{"key": "msg", "title": "提示"}], "rows": [{"msg": "暂无数据"}]}]
 
-    # 从第一条数据推断列
-    if not list_data:
-        return []
-
     first = list_data[0]
-    columns = [{"key": k, "title": k} for k in first.keys()]
-    rows = list_data[:50]  # 限制行数
+    columns = [{"key": k, "title": _FIELD_LABELS.get(k, k)} for k in first.keys()]
+    rows = list_data[:50]
 
     return [{"type": "table", "columns": columns, "rows": rows}]
 

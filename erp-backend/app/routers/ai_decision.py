@@ -592,7 +592,7 @@ def ai_sales_prediction(
 
     confidence = 0.85 if len(hist_for_wma) >= 14 else 0.5
 
-    return {
+    prediction_payload = {
         "product_id": product.id,
         "product_name": product.name,
         "history": sales_data[-30:],
@@ -601,5 +601,11 @@ def ai_sales_prediction(
         "trend": trend,
         "seasonal_factor": "",
         "suggestion": f"基于WMA预测未来30天需求约{sum(predictions)}件，趋势{trend}",
+        "confidence": confidence,
+    }
+
+    return {
+        "output_data": prediction_payload,
+        "summary": prediction_payload["suggestion"],
         "confidence": confidence,
     }

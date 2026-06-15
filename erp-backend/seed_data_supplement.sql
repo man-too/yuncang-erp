@@ -33,9 +33,9 @@ INSERT IGNORE INTO sale_orders (id, order_no, customer_id, status, order_date, t
 (11, 'SO20260115001', 2, 'completed', '2026-01-15', 28000, 1),
 (12, 'SO20260125001', 3, 'completed', '2026-01-25', 15600, 1);
 INSERT IGNORE INTO sale_order_items (order_id, product_id, quantity, shipped_quantity, unit_price, total_price) VALUES
-(10, 1, 5, 5, 3500, 17500), (10, 4, 50, 50, 200, 10000),
-(11, 2, 2000, 2000, 8.5, 17000), (11, 5, 200, 200, 320, 64000),
-(12, 6, 300, 300, 128, 38400);
+(10, 1, 5, 5, 4500, 22500), (10, 4, 50, 50, 200, 10000),
+(11, 2, 2000, 2000, 12, 24000), (11, 5, 200, 200, 80, 16000),
+(12, 6, 300, 300, 5, 1500);
 
 -- 2月
 INSERT IGNORE INTO sale_orders (id, order_no, customer_id, status, order_date, total_amount, creator_id) VALUES
@@ -43,9 +43,9 @@ INSERT IGNORE INTO sale_orders (id, order_no, customer_id, status, order_date, t
 (14, 'SO20260214001', 2, 'completed', '2026-02-14', 31000, 1),
 (15, 'SO20260220001', 1, 'completed', '2026-02-20', 18000, 1);
 INSERT IGNORE INTO sale_order_items (order_id, product_id, quantity, shipped_quantity, unit_price, total_price) VALUES
-(13, 1, 6, 6, 3500, 21000), (13, 3, 1, 1, 15000, 15000),
-(14, 2, 2500, 2500, 8.5, 21250), (14, 4, 60, 60, 200, 12000),
-(15, 5, 150, 150, 320, 48000), (15, 6, 200, 200, 128, 25600);
+(13, 1, 6, 6, 4500, 27000), (13, 3, 1, 1, 25000, 25000),
+(14, 2, 2500, 2500, 12, 30000), (14, 4, 60, 60, 200, 12000),
+(15, 5, 150, 150, 80, 12000), (15, 6, 200, 200, 5, 1000);
 
 -- 3月
 INSERT IGNORE INTO sale_orders (id, order_no, customer_id, status, order_date, total_amount, creator_id) VALUES
@@ -53,9 +53,9 @@ INSERT IGNORE INTO sale_orders (id, order_no, customer_id, status, order_date, t
 (17, 'SO20260312001', 3, 'completed', '2026-03-12', 42000, 1),
 (18, 'SO20260322001', 2, 'completed', '2026-03-22', 22000, 1);
 INSERT IGNORE INTO sale_order_items (order_id, product_id, quantity, shipped_quantity, unit_price, total_price) VALUES
-(16, 1, 8, 8, 3500, 28000), (16, 4, 80, 80, 200, 16000),
-(17, 2, 3000, 3000, 8.5, 25500), (17, 5, 100, 100, 320, 32000),
-(18, 3, 1, 1, 15000, 15000), (18, 6, 400, 400, 128, 51200);
+(16, 1, 8, 8, 4500, 36000), (16, 4, 80, 80, 200, 16000),
+(17, 2, 3000, 3000, 12, 36000), (17, 5, 100, 100, 80, 8000),
+(18, 3, 1, 1, 25000, 25000), (18, 6, 400, 400, 5, 2000);
 
 -- 4月
 INSERT IGNORE INTO sale_orders (id, order_no, customer_id, status, order_date, total_amount, creator_id) VALUES
@@ -64,26 +64,26 @@ INSERT IGNORE INTO sale_orders (id, order_no, customer_id, status, order_date, t
 (21, 'SO20260418001', 3, 'completed', '2026-04-18', 28000, 1),
 (22, 'SO20260428001', 1, 'completed', '2026-04-28', 19000, 1);
 INSERT IGNORE INTO sale_order_items (order_id, product_id, quantity, shipped_quantity, unit_price, total_price) VALUES
-(19, 1, 7, 7, 3500, 24500), (19, 3, 1, 1, 15000, 15000), (19, 4, 30, 30, 200, 6000),
-(20, 2, 2800, 2800, 8.5, 23800), (20, 5, 120, 120, 320, 38400),
-(21, 4, 100, 100, 200, 20000), (21, 6, 500, 500, 128, 64000),
-(22, 1, 3, 3, 3500, 10500), (22, 5, 80, 80, 320, 25600);
+(19, 1, 7, 7, 4500, 31500), (19, 3, 1, 1, 25000, 25000), (19, 4, 30, 30, 200, 6000),
+(20, 2, 2800, 2800, 12, 33600), (20, 5, 120, 120, 80, 9600),
+(21, 4, 100, 100, 200, 20000), (21, 6, 500, 500, 5, 2500),
+(22, 1, 3, 3, 4500, 13500), (22, 5, 80, 80, 80, 6400);
 
 -- 5月（已有订单1-3, 再补充）
 INSERT IGNORE INTO sale_orders (id, order_no, customer_id, status, order_date, total_amount, creator_id) VALUES
 (23, 'SO20260510001', 2, 'approved', '2026-05-10', 46000, 1),
 (24, 'SO20260520001', 1, 'approved', '2026-05-20', 32000, 1);
 INSERT IGNORE INTO sale_order_items (order_id, product_id, quantity, shipped_quantity, unit_price, total_price) VALUES
-(23, 1, 5, 3, 3500, 17500), (23, 4, 60, 30, 200, 12000), (23, 5, 200, 100, 320, 64000),
-(24, 2, 3000, 1500, 8.5, 25500), (24, 6, 350, 150, 128, 44800);
+(23, 1, 5, 3, 4500, 22500), (23, 4, 60, 30, 200, 12000), (23, 5, 200, 100, 80, 16000),
+(24, 2, 3000, 1500, 12, 36000), (24, 6, 350, 150, 5, 1750);
 
 -- 6月（本月已有，再加一些近期数据）
 INSERT IGNORE INTO sale_orders (id, order_no, customer_id, status, order_date, total_amount, creator_id) VALUES
 (25, 'SO20260601001', 1, 'approved', '2026-06-01', 38000, 1),
 (26, 'SO20260602001', 3, 'pending_approval', '2026-06-02', 15000, 1);
 INSERT IGNORE INTO sale_order_items (order_id, product_id, quantity, shipped_quantity, unit_price, total_price) VALUES
-(25, 1, 4, 0, 3500, 14000), (25, 3, 1, 0, 15000, 15000), (25, 5, 100, 0, 320, 32000),
-(26, 4, 50, 0, 200, 10000), (26, 6, 200, 0, 128, 25600);
+(25, 1, 4, 0, 4500, 18000), (25, 3, 1, 0, 25000, 25000), (25, 5, 100, 0, 80, 8000),
+(26, 4, 50, 0, 200, 10000), (26, 6, 200, 0, 5, 1000);
 
 -- 更新出库数据
 UPDATE sale_orders SET shipped_amount = total_amount WHERE status = 'completed' AND shipped_amount = 0;

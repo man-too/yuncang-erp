@@ -42,23 +42,23 @@ INSERT IGNORE INTO inventory_alerts (product_id, warehouse_id, alert_type, curre
 
 -- 6. 销售订单 + 明细 + 出库
 INSERT IGNORE INTO sale_orders (id, order_no, customer_id, status, order_date, total_amount, creator_id) VALUES
-(1, 'SO20260501001', 1, 'completed', '2026-05-01', 85000, 1),
-(2, 'SO20260502001', 2, 'approved', '2026-05-02', 32000, 1),
-(3, 'SO20260503001', 3, 'draft', '2026-05-03', 12800, 1);
+(1, 'SO20260501001', 1, 'completed', '2026-05-01', 97000, 1),
+(2, 'SO20260502001', 2, 'approved', '2026-05-02', 4240, 1),
+(3, 'SO20260503001', 3, 'draft', '2026-05-03', 500, 1);
 
 INSERT IGNORE INTO sale_order_items (order_id, product_id, quantity, shipped_quantity, unit_price, total_price) VALUES
-(1, 1, 10, 10, 3500, 35000),
-(1, 3, 2, 2, 15000, 30000),
-(1, 4, 10, 10, 2000, 20000),
-(2, 2, 20, 0, 800, 16000),
-(2, 5, 50, 0, 320, 16000),
-(3, 6, 100, 0, 128, 12800);
+(1, 1, 10, 10, 4500, 45000),
+(1, 3, 2, 2, 25000, 50000),
+(1, 4, 10, 10, 200, 2000),
+(2, 2, 20, 0, 12, 240),
+(2, 5, 50, 0, 80, 4000),
+(3, 6, 100, 0, 5, 500);
 
 INSERT IGNORE INTO sale_outbounds (outbound_no, order_id, warehouse_id, operator_id, outbound_date, total_amount) VALUES
-('OUT20260505001', 1, 1, 1, '2026-05-05', 85000);
+('OUT20260505001', 1, 1, 1, '2026-05-05', 97000);
 
 -- 更新已发货数量
-UPDATE sale_orders SET shipped_amount = 85000 WHERE id = 1 AND shipped_amount = 0;
+UPDATE sale_orders SET shipped_amount = 97000 WHERE id = 1 AND shipped_amount = 0;
 
 -- 7. AI 决策历史记录
 INSERT IGNORE INTO ai_decision_records (id, decision_type, title, input_data, output_data, summary, confidence, related_id, is_applied) VALUES
