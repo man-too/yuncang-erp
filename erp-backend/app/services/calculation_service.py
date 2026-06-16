@@ -103,9 +103,11 @@ def calc_reorder_point(
     if not product:
         return {"error": f"产品 {product_id} 不存在"}
 
-    # ── lead_time ──
+    # ── 产品级交期覆盖 ──
     lead_time = 7  # 默认 7 天
-    if supplier_id:
+    if product.lead_time_override is not None:
+        lead_time = product.lead_time_override
+    elif supplier_id:
         supplier = db.get(Supplier, supplier_id)
         if supplier and supplier.delivery_lead_time:
             lead_time = supplier.delivery_lead_time
@@ -286,7 +288,9 @@ def calc_reorder_point(
     )
 
     rop = avg_daily * lead_time + safety_stock
-    suggested_qty = max(round(rop) - int(current_qty) - int(in_transit_qty), 0)
+    raw_suggested = max(round(rop) - int(current_qty) - int(in_transit_qty), 0)
+    box_qty = product.box_qty or 1
+    suggested_qty = math.ceil(raw_suggested / box_qty) * box_qty if raw_suggested > 0 else 0
 
     return {
         "product_id": product_id,
@@ -488,6 +492,11 @@ def batch_calc_reorder_point(
     for pid in product_ids:
         lead_time_map.setdefault(pid, 7)
 
+    # 产品级交期覆盖
+    for pid, prod in products.items():
+        if prod.lead_time_override is not None:
+            lead_time_map[pid] = prod.lead_time_override
+
     # ── 当前库存（按产品聚合所有仓库）──
     inv_rows = (
         db.query(
@@ -675,7 +684,9 @@ def batch_calc_reorder_point(
         )
         rop_val = avg_daily * lt + safety_stock
 
-        suggested_qty = max(round(rop_val) - int(current_qty) - int(in_transit_qty), 0)
+        raw_suggested = max(round(rop_val) - int(current_qty) - int(in_transit_qty), 0)
+        box_qty = prod.box_qty or 1
+        suggested_qty = math.ceil(raw_suggested / box_qty) * box_qty if raw_suggested > 0 else 0
 
         entry = {
             "product_id": pid,

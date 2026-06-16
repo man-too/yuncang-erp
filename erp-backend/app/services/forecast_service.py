@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from app.config import settings
+from app.config import Settings, settings
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +98,7 @@ class ForecastService:
     降级链: Prophet(>=30天) → Naive Seasonal(>=14天) → WMA(任意) → None(无数据)
     """
 
-    def __init__(self, db: Session, config: settings | None = None, cache: CacheBackend | None = None):
+    def __init__(self, db: Session, config: Settings | None = None, cache: CacheBackend | None = None):
         self.db = db
         self.config = config or settings
         self.cache = cache or MemoryCacheBackend()
@@ -144,6 +144,20 @@ class ForecastService:
             if cached is not None:
                 return cached
 
+        # 读取产品级预测配置
+        from app.models.product import Product
+        product = self.db.get(Product, product_id)
+        product_model = None
+        product_seasonality = None
+        if product is not None:
+            if product.forecast_model and product.forecast_model != "auto":
+                product_model = product.forecast_model
+            if product.seasonality_type and product.seasonality_type != "auto":
+                product_seasonality = product.seasonality_type
+
+        # 产品级 forecast_model 优先于调用方传入的 model_override
+        effective_override = product_model or model_override
+
         # 查数据
         df = self._fetch_daily_sales(product_id)
         data_points = len(df)
@@ -161,14 +175,14 @@ class ForecastService:
             self.cache.set(product_id, result)
             return result
 
-        # 选模型 — 使用 ModelSelector
-        selection = self.model_selector.select_model(product_id, data_points, model_override)
+        # 选模型 — 使用 ModelSelector，产品级配置优先
+        selection = self.model_selector.select_model(product_id, data_points, effective_override)
         model_type = selection.model_name
 
         try:
             if model_type == "prophet":
                 try:
-                    result = self._run_prophet(df, horizon)
+                    result = self._run_prophet(df, horizon, seasonality_hint=product_seasonality)
                 except Exception as e:
                     logger.warning(f"[Forecast] Prophet 失败 product={product_id}: {e}，降级为 naive")
                     result = self._run_naive(df, horizon)
@@ -180,7 +194,7 @@ class ForecastService:
             elif model_type == "ensemble":
                 prophet_r = None
                 try:
-                    prophet_r = self._run_prophet(df, horizon)
+                    prophet_r = self._run_prophet(df, horizon, seasonality_hint=product_seasonality)
                 except Exception as e:
                     logger.warning(f"[Forecast] Ensemble 中 Prophet 失败: {e}")
                 naive_r = self._run_naive(df, horizon)
@@ -316,15 +330,25 @@ class ForecastService:
 
     # ── Prophet 预测 ────────────────────────────────────────────
 
-    def _run_prophet(self, df: pd.DataFrame, horizon: int) -> ForecastResult:
-        """Darts Prophet 包装，支持中国节假日和自适应季节性"""
+    def _run_prophet(self, df: pd.DataFrame, horizon: int, seasonality_hint: str | None = None) -> ForecastResult:
+        """Darts Prophet 包装，支持中国节假日和自适应季节性
+
+        Args:
+            seasonality_hint: 产品级季节性配置 ("weekly"/"yearly"/"both"/"none")，
+                              覆盖基于数据量的自动判断
+        """
         if not _DARTS_AVAILABLE:
             raise RuntimeError("darts 未安装")
 
         data_days = len(df)
-        # 季节性配置：数据不足 365 天时禁用年季节性
-        yearly = data_days >= 365
-        weekly = data_days >= 14
+
+        # 季节性配置：产品级 hint 优先，否则按数据量自动判断
+        if seasonality_hint and seasonality_hint != "auto":
+            yearly = seasonality_hint in ("yearly", "both")
+            weekly = seasonality_hint in ("weekly", "both")
+        else:
+            yearly = data_days >= 365
+            weekly = data_days >= 14
 
         model = DartsProphet(
             add_seasonalities={
@@ -541,13 +565,12 @@ class ForecastService:
 
 # ── 模块级便捷函数（向后兼容） ─────────────────────────────────
 
-_default_service_cache: dict[int, ForecastService] = {}
+_shared_cache = MemoryCacheBackend()
 
 
 def _get_service(db: Session) -> ForecastService:
-    """每个 db session 复用同一个 service 实例"""
-    # 简单实现：每次新建
-    return ForecastService(db)
+    """使用共享缓存，跨请求复用预测结果"""
+    return ForecastService(db, cache=_shared_cache)
 
 
 def forecast_product_demand(
@@ -571,10 +594,10 @@ def forecast_batch_demand(
 
 
 def get_cached_forecast(product_id: int) -> ForecastResult | None:
-    """兼容旧接口 — 不推荐使用"""
-    return None
+    """从共享缓存获取预测结果"""
+    return _shared_cache.get(product_id)
 
 
 def invalidate_forecast_cache(product_id: int | None = None) -> None:
-    """兼容旧接口 — 不推荐使用"""
-    pass
+    """清除共享缓存"""
+    _shared_cache.delete(product_id)
