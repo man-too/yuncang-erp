@@ -5,6 +5,7 @@
 
 import logging
 import math
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -21,6 +22,15 @@ logger = logging.getLogger(__name__)
 
 # ── Darts 可选导入 ──────────────────────────────────────────────
 _DARTS_AVAILABLE = False
+
+# Prophet/Stan 在 Windows 中文路径下无法解析 CSV，临时目录需为纯英文
+import platform
+if platform.system() == "Windows":
+    _ascii_tmp = "C:\\tmp\\prophet"
+    os.makedirs(_ascii_tmp, exist_ok=True)
+    os.environ["TMP"] = _ascii_tmp
+    os.environ["TEMP"] = _ascii_tmp
+
 try:
     from darts import TimeSeries
     from darts.models import NaiveSeasonal, Prophet as DartsProphet
@@ -182,7 +192,7 @@ class ForecastService:
         try:
             if model_type == "prophet":
                 try:
-                    result = self._run_prophet(df, horizon, seasonality_hint=product_seasonality)
+                    result = self._run_prophet(df, horizon, seasonality_hint=product_seasonality, product_id=product_id)
                 except Exception as e:
                     logger.warning(f"[Forecast] Prophet 失败 product={product_id}: {e}，降级为 naive")
                     result = self._run_naive(df, horizon)
@@ -194,7 +204,7 @@ class ForecastService:
             elif model_type == "ensemble":
                 prophet_r = None
                 try:
-                    prophet_r = self._run_prophet(df, horizon, seasonality_hint=product_seasonality)
+                    prophet_r = self._run_prophet(df, horizon, seasonality_hint=product_seasonality, product_id=product_id)
                 except Exception as e:
                     logger.warning(f"[Forecast] Ensemble 中 Prophet 失败: {e}")
                 naive_r = self._run_naive(df, horizon)
@@ -249,6 +259,84 @@ class ForecastService:
     def invalidate_cache(self, product_id: int | None = None) -> None:
         """清除指定产品或全部缓存"""
         self.cache.delete(product_id)
+
+    # ── 促销回归量 ─────────────────────────────────────────────────
+
+    def _build_promo_covariate(
+        self, product_id: int, df: pd.DataFrame, horizon: int,
+        as_of_date: date | None = None,
+    ) -> dict | None:
+        """查询该产品的促销活动，构建 is_promo + lift_pct 双列回归量
+
+        Args:
+            as_of_date: 回测时传入历史切点，避免使用未来促销造成 lookahead bias。
+                        None 表示真实预测场景，使用 today。
+
+        Returns: {"history": TimeSeries, "future": TimeSeries} or None
+        """
+        if not _DARTS_AVAILABLE:
+            return None
+
+        try:
+            from app.models.promotion import Promotion
+
+            ref_date = as_of_date or date.today()
+            promotions = self.db.query(Promotion).filter(
+                Promotion.is_active == True,
+                Promotion.start_date <= ref_date + timedelta(days=horizon),
+            ).all()
+
+            # 筛选涉及该产品的促销
+            # P1-8 修复：区分 None（全产品）与 [] / 草稿（无产品）
+            relevant = [
+                p for p in promotions
+                if p.product_ids is None or (p.product_ids and product_id in p.product_ids)
+            ]
+            if not relevant:
+                return None
+
+            # 构建 history 回归量（跟 df 同长度）
+            dates = pd.to_datetime(df["ds"])
+            promo_flag = []
+            lift_pct = []
+            for d in dates:
+                d_date = d.date() if hasattr(d, 'date') else d
+                active = [p for p in relevant if p.start_date <= d_date and p.end_date >= d_date]
+                if active:
+                    promo_flag.append(1.0)
+                    lift_pct.append(max(p.expected_lift_pct for p in active) / 100.0)
+                else:
+                    promo_flag.append(0.0)
+                    lift_pct.append(0.0)
+
+            history_df = pd.DataFrame({"ds": df["ds"], "is_promo": promo_flag, "lift_pct": lift_pct})
+            history_cov = TimeSeries.from_dataframe(history_df, time_col="ds", value_cols=["is_promo", "lift_pct"])
+
+            # 构建 future 回归量（horizon 天）
+            last_date = dates.iloc[-1]
+            future_dates = pd.date_range(start=last_date + timedelta(days=1), periods=horizon, freq="D")
+            future_ds = future_dates.strftime("%Y-%m-%d").tolist()
+            future_flag = []
+            future_lift = []
+            for d in future_dates:
+                d_date = d.date()
+                active = [p for p in relevant if p.start_date <= d_date and p.end_date >= d_date]
+                if active:
+                    future_flag.append(1.0)
+                    future_lift.append(max(p.expected_lift_pct for p in active) / 100.0)
+                else:
+                    future_flag.append(0.0)
+                    future_lift.append(0.0)
+
+            future_df = pd.DataFrame({"ds": future_ds, "is_promo": future_flag, "lift_pct": future_lift})
+            future_cov = TimeSeries.from_dataframe(future_df, time_col="ds", value_cols=["is_promo", "lift_pct"])
+
+            logger.info(f"[Forecast] Product {product_id}: {len(relevant)} promotions as regressors")
+            return {"history": history_cov, "future": future_cov}
+
+        except Exception as e:
+            logger.warning(f"[Forecast] Promo covariate build failed for product {product_id}: {e}")
+            return None
 
     # ── 数据查询 ────────────────────────────────────────────────
 
@@ -330,12 +418,13 @@ class ForecastService:
 
     # ── Prophet 预测 ────────────────────────────────────────────
 
-    def _run_prophet(self, df: pd.DataFrame, horizon: int, seasonality_hint: str | None = None) -> ForecastResult:
+    def _run_prophet(self, df: pd.DataFrame, horizon: int, seasonality_hint: str | None = None, product_id: int = 0, as_of_date: date | None = None) -> ForecastResult:
         """Darts Prophet 包装，支持中国节假日和自适应季节性
 
         Args:
             seasonality_hint: 产品级季节性配置 ("weekly"/"yearly"/"both"/"none")，
                               覆盖基于数据量的自动判断
+            as_of_date: 回测时的历史切点，传给促销回归量避免 lookahead bias
         """
         if not _DARTS_AVAILABLE:
             raise RuntimeError("darts 未安装")
@@ -351,21 +440,29 @@ class ForecastService:
             weekly = data_days >= 14
 
         model = DartsProphet(
-            add_seasonalities={
-                **({"yearly": True} if yearly else {}),
-                **({"weekly": True} if weekly else {}),
-            },
             country_holidays="CN",
+            yearly_seasonality=yearly,
+            weekly_seasonality=weekly,
         )
 
-        series = TimeSeries.from_dataframe(df, time_col="ds", value_cols="y")
-        model.fit(series)
+        # 构建促销回归量（历史+未来）
+        promo_cov = self._build_promo_covariate(product_id, df, horizon, as_of_date=as_of_date)
 
-        # 概率预测获取置信区间
-        pred = model.predict(n=horizon, num_samples=200)
-        mid_values = pred.mean(axis=1).values().flatten().tolist()
-        low_values = pred.quantile(0.1, axis=1).values().flatten().tolist()
-        high_values = pred.quantile(0.9, axis=1).values().flatten().tolist()
+        series = TimeSeries.from_dataframe(df, time_col="ds", value_cols="y")
+
+        if promo_cov is not None:
+            # Darts Prophet: future_covariates 需要同时覆盖训练期和预测期
+            from darts import TimeSeries as TS
+            combined_cov = promo_cov["history"].concatenate(promo_cov["future"])
+            model.fit(series, future_covariates=combined_cov)
+            pred = model.predict(n=horizon, num_samples=200, future_covariates=combined_cov)
+        else:
+            model.fit(series)
+            pred = model.predict(n=horizon, num_samples=200)
+        pred_vals = pred.values()  # shape: (horizon, num_samples)
+        mid_values = pred_vals.mean(axis=1).flatten().tolist()
+        low_values = np.quantile(pred_vals, 0.1, axis=1).flatten().tolist()
+        high_values = np.quantile(pred_vals, 0.9, axis=1).flatten().tolist()
 
         # 季节性检测
         seasonality_type = "none"
@@ -381,12 +478,12 @@ class ForecastService:
         return ForecastResult(
             product_id=0,  # caller fills
             model_used="prophet",
-            forecast_mid=[max(0.0, v) for v in mid_values],
-            forecast_low=[max(0.0, v) for v in low_values],
-            forecast_high=[max(0.0, v) for v in high_values],
-            avg_daily_forecast=float(np.mean(mid_values)),
-            avg_daily_low=float(np.mean(low_values)),
-            avg_daily_high=float(np.mean(high_values)),
+            forecast_mid=[max(0, round(v)) for v in mid_values],
+            forecast_low=[max(0, round(v)) for v in low_values],
+            forecast_high=[max(0, round(v)) for v in high_values],
+            avg_daily_forecast=round(float(np.mean(mid_values)), 2),
+            avg_daily_low=round(float(np.mean(low_values)), 2),
+            avg_daily_high=round(float(np.mean(high_values)), 2),
             seasonality_detected=seasonality_type != "none",
             seasonality_type=seasonality_type,
             data_points=data_days,
@@ -423,13 +520,13 @@ class ForecastService:
                 base = y[-(7 - (i % 7))] if i < 7 else y[-7 + (i % 7)]
             else:
                 base = np.mean(y) if n > 0 else 0.0
-            val = max(0.0, base * trend_ratio)
+            val = max(0, round(base * trend_ratio))
             mid.append(val)
 
             # 置信区间：基于历史标准差
             spread = z_score * std
-            low.append(max(0.0, val - spread))
-            high.append(val + spread)
+            low.append(max(0, round(val - spread)))
+            high.append(round(val + spread))
 
         confidence = self._calc_confidence(mid, low, high, n)
 
@@ -441,9 +538,9 @@ class ForecastService:
             forecast_mid=mid,
             forecast_low=low,
             forecast_high=high,
-            avg_daily_forecast=avg_mid,
-            avg_daily_low=float(np.mean(low)),
-            avg_daily_high=float(np.mean(high)),
+            avg_daily_forecast=round(avg_mid, 2),
+            avg_daily_low=round(float(np.mean(low)), 2),
+            avg_daily_high=round(float(np.mean(high)), 2),
             seasonality_detected=True,
             seasonality_type="weekly",
             data_points=n,
@@ -464,10 +561,10 @@ class ForecastService:
         std7 = (sum((v - avg7) ** 2 for v in last7) / len(last7)) ** 0.5 if len(last7) >= 2 else 0.0
         volatility = std7 * 0.3
 
-        mid = [max(0.0, wma + math.sin(i * 2.7 + 1.3) * volatility) for i in range(horizon)]
+        mid = [max(0, round(wma + math.sin(i * 2.7 + 1.3) * volatility)) for i in range(horizon)]
         spread = max(wma * 0.3, volatility * 2, 1.0)
-        low = [max(0.0, v - spread) for v in mid]
-        high = [v + spread for v in mid]
+        low = [max(0, round(v - spread)) for v in mid]
+        high = [round(v + spread) for v in mid]
 
         confidence = self._calc_confidence(mid, low, high, len(y))
 
@@ -479,9 +576,9 @@ class ForecastService:
             forecast_mid=mid,
             forecast_low=low,
             forecast_high=high,
-            avg_daily_forecast=avg_mid,
-            avg_daily_low=float(np.mean(low)),
-            avg_daily_high=float(np.mean(high)),
+            avg_daily_forecast=round(avg_mid, 2),
+            avg_daily_low=round(float(np.mean(low)), 2),
+            avg_daily_high=round(float(np.mean(high)), 2),
             seasonality_detected=False,
             seasonality_type="none",
             data_points=len(y),
@@ -524,12 +621,12 @@ class ForecastService:
         return ForecastResult(
             product_id=prophet_result.product_id,
             model_used="ensemble",
-            forecast_mid=[max(0.0, v) for v in mid],
-            forecast_low=[max(0.0, v) for v in low],
-            forecast_high=high,
-            avg_daily_forecast=avg_mid,
-            avg_daily_low=float(np.mean(low)),
-            avg_daily_high=float(np.mean(high)),
+            forecast_mid=[max(0, round(v)) for v in mid],
+            forecast_low=[max(0, round(v)) for v in low],
+            forecast_high=[max(0, round(v)) for v in high],
+            avg_daily_forecast=round(avg_mid, 2),
+            avg_daily_low=round(float(np.mean(low)), 2),
+            avg_daily_high=round(float(np.mean(high)), 2),
             seasonality_detected=prophet_result.seasonality_detected or naive_result.seasonality_detected,
             seasonality_type=prophet_result.seasonality_type if prophet_result.seasonality_detected else naive_result.seasonality_type,
             data_points=max(prophet_result.data_points, naive_result.data_points),

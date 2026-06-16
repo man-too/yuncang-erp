@@ -161,24 +161,41 @@ def build_welcome_context(db: Session) -> dict:
     from app.models.supplier import Supplier
     from app.models.sale import SaleOrder, SaleOrderItem
 
-    # Low stock
-    low_rows = (
-        db.query(Product.name, Inventory.quantity, Product.min_stock, Product.unit,
-                 Warehouse.name.label("wname"))
+    # Low stock (按产品聚合全仓库库存后判断)
+    low_stock_rows = (
+        db.query(
+            Product.name, Product.min_stock, Product.unit,
+            func.sum(Inventory.quantity).label("total_qty"),
+            func.group_concat(func.distinct(Warehouse.name)).label("warehouses"),
+        )
         .join(Inventory, Inventory.product_id == Product.id)
-        .join(Warehouse, Inventory.warehouse_id == Warehouse.id)
-        .filter(Inventory.quantity <= Product.min_stock, Inventory.quantity >= 0)
-        .order_by(Inventory.quantity)
+        .join(Warehouse, Warehouse.id == Inventory.warehouse_id)
+        .group_by(Product.id)
+        .having(func.sum(Inventory.quantity) <= Product.min_stock)
+        .order_by(func.sum(Inventory.quantity))
         .limit(10).all()
     )
     low_stock = [
-        {"name": r[0], "qty": float(r[1]), "min": float(r[2]), "unit": r[3], "warehouse": r[4]}
-        for r in low_rows
+        {
+            "name": r[0],
+            "qty": float(r[3]),
+            "min": float(r[1]),
+            "unit": r[2],
+            "warehouse": (r[4] or "").replace(",", "、") if r[4] else "未知仓库",
+        }
+        for r in low_stock_rows
     ]
 
-    # Out of stock count
+    # Out of stock count (全仓库总量为0的产品数)
     out_of_stock = (
-        db.query(Inventory).filter(Inventory.quantity == 0).count()
+        db.query(func.count())
+        .select_from(
+            db.query(Inventory.product_id)
+            .group_by(Inventory.product_id)
+            .having(func.sum(Inventory.quantity) == 0)
+            .subquery()
+        )
+        .scalar() or 0
     )
 
     # Monthly sales (last 6 months)
@@ -390,6 +407,7 @@ def _process_tool_calls(tool_calls: list, db: Session, creator_id: int) -> tuple
         tc_id = tc.id if hasattr(tc, "id") else tc.get("id", "")
         meta = get_tool_meta(name)
         result = None
+        per_tool_condensed: str | None = None
 
         if meta and meta.requires_confirm:
             tool_results.append({
@@ -414,12 +432,13 @@ def _process_tool_calls(tool_calls: list, db: Session, creator_id: int) -> tuple
                     condensed_text = json.dumps(condensed, ensure_ascii=False, default=str)
                 else:
                     condensed_text = str(condensed)
-                condense_texts.append(f"[{name}] {condensed_text}")
+                per_tool_condensed = f"[{name}] {condensed_text}"
+                condense_texts.append(per_tool_condensed)
 
-            # tool result: condense result feeds LLM (not full JSON)
+            # tool result: this tool's own condense feeds LLM (not full JSON)
             tool_results.append({
                 "role": "tool", "tool_call_id": tc_id,
-                "content": condense_texts[-1] if condense_texts else "工具已执行。",
+                "content": per_tool_condensed if per_tool_condensed else "工具已执行。",
             })
 
         if result is not None:
@@ -555,6 +574,7 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
         direct_blocks = []
         condense_texts = []
         tool_cache = {}
+        all_tool_calls: list = []  # accumulate every round's tool_calls (P1-4 fix)
 
         for round_idx in range(MAX_L1_ROUNDS):
             resp = _call_llm_once(full_messages, tool_choice="auto", temperature=0.3)
@@ -595,6 +615,7 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
             direct_blocks.extend(round_blocks)
             condense_texts.extend(round_condense)
             tool_cache.update(round_cache)
+            all_tool_calls.extend(msg.tool_calls)  # accumulate for downstream use
 
             logger.info(f"[Chat] L1 round={round_idx+1} 工具执行完毕, blocks={len(round_blocks)}, condense={len(round_condense)}")
 
@@ -611,7 +632,7 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
 
         # chart_only → skip Layer 2
         if intent.intent == "chart_only":
-            content = _template_fallback(msg.tool_calls, tool_cache, db)
+            content = _template_fallback(all_tool_calls, tool_cache, db)
             return {"content": content, "blocks": _dedup_chart_blocks(direct_blocks)}
 
         # Layer 2: analysis (1 LLM call, pure text)
@@ -625,7 +646,7 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
         if direct_blocks:
             analysis_messages.append({"role": "system", "content": ANALYSIS_HINT_RENDER})
         # 注入场景化策略提示（补货 / 供应商）
-        for hint in _strategy_hints_for_tools(msg.tool_calls):
+        for hint in _strategy_hints_for_tools(all_tool_calls):
             analysis_messages.append({"role": "system", "content": hint})
 
         try:
@@ -651,7 +672,7 @@ def chat(messages: list[dict], db: Session, creator_id: int = 0) -> dict:
 
         # Fallback: if LLM analysis empty but we have blocks
         if not parsed.get("content", "").strip() and direct_blocks:
-            parsed["content"] = _template_fallback(msg.tool_calls, tool_cache, db)
+            parsed["content"] = _template_fallback(all_tool_calls, tool_cache, db)
 
         return parsed
 

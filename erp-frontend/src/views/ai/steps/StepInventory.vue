@@ -713,8 +713,14 @@ async function setDetailTimeRange(range: '7d' | '30d' | '3m') {
 
 const ropLoading = ref(false)
 const ropResult = ref<any>(null)
+// P1-13 修复：去重缓存，防止 watch + onMounted + auto-expand 三重触发
+const _detailFetchKey = ref<string>('')
 
 async function loadDetailData(productId: number) {
+  const key = `${productId}-${detailTimeRange.value}`
+  if (_detailFetchKey.value === key) return  // 相同请求正在进行中
+  _detailFetchKey.value = key
+
   detailChartLoading.value = true
   ropLoading.value = true
   detailHistoryData.value = []
@@ -774,6 +780,7 @@ async function loadDetailData(productId: number) {
   } finally {
     detailChartLoading.value = false
     ropLoading.value = false
+    _detailFetchKey.value = ''  // P1-13 修复：完成调用后清空缓存键
   }
 }
 
@@ -902,6 +909,7 @@ async function submitDialog() {
       code: dialogForm.value.product_code,
       warehouse_id: dialogForm.value.warehouse_id!,
       warehouse_name: warehouses.value.find((w: any) => w.id === dialogForm.value.warehouse_id)?.name || '默认仓库',
+      current_qty: matchedProd?.current_qty || matchedProd?.quantity || 0,
       min_stock: matchedProd?.min_stock || 0,
       max_stock: matchedProd?.max_stock || 0,
       unit: dialogForm.value.unit,

@@ -474,8 +474,9 @@ def ai_batch_rop(
     from app.services.calculation_service import batch_calc_reorder_point
     product_ids = data.get("product_ids", [])
     if not product_ids:
-        return {}
-    return batch_calc_reorder_point(product_ids, db)
+        return {"results": []}
+    result_map = batch_calc_reorder_point(product_ids, db)
+    return {"results": list(result_map.values())}
 
 
 @router.post("/supplier-score")
@@ -760,12 +761,14 @@ def ai_replenish_recommend(
             continue
 
     # 7. 提取 summary —— 标签之后的非标签文字
-    summary = ""
+    # P1-6 修复：单一分支，去掉自我覆盖的死代码
     summary_text = tag_pattern.sub("", ai_text).strip()
-    if summary_text:
-        summary = summary_text.splitlines()[-1].strip() if summary_text else ""
-        if len(summary_text) <= 200:
-            summary = summary_text
+    if not summary_text:
+        summary = ""
+    elif len(summary_text) <= 200:
+        summary = summary_text
+    else:
+        summary = summary_text.splitlines()[-1].strip()
 
     # 8. 合并：解析到的覆盖基线，未解析到的回退基线
     recommendations = []

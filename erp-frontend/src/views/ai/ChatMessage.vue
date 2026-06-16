@@ -14,7 +14,7 @@
             <v-chart
               v-if="hasValidChartData(block)"
               :key="block._dedupKey ?? bi"
-              :option="chartWithDefaultTitle(block)"
+              :option="getChartOption(block, bi)"
               autoresize
               class="chart-render"
             />
@@ -105,6 +105,7 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -206,7 +207,13 @@ const sanitized = computed(() => sanitizeContent(props.content, props.blocks))
 const renderedContent = computed(() => {
   const cleanContent = sanitized.value.cleanContent
   if (!cleanContent) return ''
-  return marked(cleanContent, { breaks: true })
+  // P0-1 修复：marked 输出经 DOMPurify 净化，防 XSS
+  const rawHtml = marked(cleanContent, { breaks: true }) as string
+  return DOMPurify.sanitize(rawHtml, {
+    ADD_ATTR: ['target', 'rel'],
+    FORBID_TAGS: ['style', 'iframe', 'script', 'object', 'embed', 'form'],
+    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover'],
+  })
 })
 
 // 合并原有 blocks 和额外提取的 blocks，去重避免重影
@@ -269,6 +276,25 @@ function chartWithDefaultTitle(block: MessageBlock) {
     opt.series = [{ type: block.chartType || 'bar', data: [] }]
   }
   return opt
+}
+
+// P1-7 修复：缓存 chart option，避免模板每次渲染都生成新对象触发 echarts 全量 setOption
+const chartOptionMap = computed(() => {
+  const map = new Map<string, any>()
+  for (let i = 0; i < deduplicatedBlocks.value.length; i++) {
+    const block = deduplicatedBlocks.value[i]
+    if (block.type === 'chart') {
+      const key = block._dedupKey ?? `chart-idx-${i}`
+      map.set(key, chartWithDefaultTitle(block))
+    }
+  }
+  return map
+})
+
+function getChartOption(block: MessageBlock & { _dedupKey?: string }, index: number): any {
+  const key = block._dedupKey ?? `chart-idx-${index}`
+  const cached = chartOptionMap.value.get(key)
+  return cached ?? chartWithDefaultTitle(block)
 }
 
 function navigateTo(link: string) {

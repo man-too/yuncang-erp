@@ -18,15 +18,17 @@ http.interceptors.request.use((config) => {
 })
 
 // 响应拦截器：统一错误处理
+// P1-12 修复：支持 silent 选项，避免双重错误提示
 http.interceptors.response.use(
   (response) => response.data,
   (error) => {
+    const silent = error.config?.silent || error.config?.headers?.['X-Silent']
     if (error.response?.status === 401) {
       localStorage.removeItem('token')
       router.push('/login')
-      ElMessage.error('登录已过期，请重新登录')
+      if (!silent) ElMessage.error('登录已过期，请重新登录')
     } else {
-      ElMessage.error(error.response?.data?.detail || '请求失败')
+      if (!silent) ElMessage.error(error.response?.data?.detail || '请求失败')
     }
     return Promise.reject(error)
   },

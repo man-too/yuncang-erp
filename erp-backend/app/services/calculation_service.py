@@ -288,17 +288,20 @@ def calc_reorder_point(
     )
 
     rop = avg_daily * lead_time + safety_stock
-    raw_suggested = max(round(rop) - int(current_qty) - int(in_transit_qty), 0)
+    # ROP 驱动的建议量；若库存低于 min_stock 则至少补到 min_stock
+    rop_based = max(round(rop) - int(current_qty) - int(in_transit_qty), 0)
+    min_stock_gap = max(round(product.min_stock or 0) - int(current_qty) - int(in_transit_qty), 0)
+    raw_suggested = max(rop_based, min_stock_gap)
     box_qty = product.box_qty or 1
     suggested_qty = math.ceil(raw_suggested / box_qty) * box_qty if raw_suggested > 0 else 0
 
     return {
         "product_id": product_id,
         "product_name": product.name,
-        "rop": round(rop, 2),
+        "rop": int(round(rop)),
         "avg_daily_sales": round(avg_daily, 2),
         "lead_time": lead_time,
-        "safety_stock": round(safety_stock, 2),
+        "safety_stock": int(round(safety_stock)),
         "service_level": {"A": "95%", "B": "90%", "C": "85%"}[abc],
         "abc_class": abc,
         # 新增字段（P0 状态快照）
@@ -678,23 +681,29 @@ def batch_calc_reorder_point(
             rop_val = avg_daily * lt + safety_stock
 
         # ── 预测融合 ──
-        fr = forecast_map.get(pid)
-        avg_daily, safety_stock, batch_forecast_fields = _blend_forecast_into_rop(
-            avg_daily, safety_stock, fr, z
-        )
-        rop_val = avg_daily * lt + safety_stock
+        # P1-5 修复：仅在有销量历史时融合预测；新品/冷品保留 min_stock 语义
+        if quantities:
+            fr = forecast_map.get(pid)
+            avg_daily, safety_stock, batch_forecast_fields = _blend_forecast_into_rop(
+                avg_daily, safety_stock, fr, z
+            )
+            rop_val = avg_daily * lt + safety_stock
+        else:
+            batch_forecast_fields = {}
 
-        raw_suggested = max(round(rop_val) - int(current_qty) - int(in_transit_qty), 0)
+        rop_based = max(round(rop_val) - int(current_qty) - int(in_transit_qty), 0)
+        min_stock_gap = max(round(prod.min_stock or 0) - int(current_qty) - int(in_transit_qty), 0)
+        raw_suggested = max(rop_based, min_stock_gap)
         box_qty = prod.box_qty or 1
         suggested_qty = math.ceil(raw_suggested / box_qty) * box_qty if raw_suggested > 0 else 0
 
         entry = {
             "product_id": pid,
             "product_name": prod.name,
-            "rop": round(rop_val, 2),
+            "rop": int(round(rop_val)),
             "avg_daily_sales": round(avg_daily, 2),
             "lead_time": lt,
-            "safety_stock": round(safety_stock, 2),
+            "safety_stock": int(round(safety_stock)),
             "service_level": _ABC_SERVICE.get(abc, "85%"),
             "abc_class": abc,
             # 新增字段（P0 状态快照）

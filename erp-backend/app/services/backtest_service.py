@@ -192,8 +192,25 @@ class BacktestService:
 
             # 根据模型名选择方法
             horizon = len(actual)
+            # P0-2 修复：回测时传 as_of_date=训练窗口最后日期，避免促销 lookahead bias
+            train_last_date = None
+            if not train_df.empty:
+                last_ds = train_df["ds"].iloc[-1]
+                if hasattr(last_ds, "date"):
+                    train_last_date = last_ds.date()
+                elif isinstance(last_ds, str):
+                    try:
+                        train_last_date = date.fromisoformat(last_ds[:10])
+                    except ValueError:
+                        train_last_date = None
+                else:
+                    try:
+                        train_last_date = date.fromisoformat(str(last_ds)[:10])
+                    except ValueError:
+                        train_last_date = None
+
             if model_name == "prophet":
-                result = svc._run_prophet(train_df, horizon)
+                result = svc._run_prophet(train_df, horizon, product_id=product_id, as_of_date=train_last_date)
             elif model_name == "naive":
                 result = svc._run_naive(train_df, horizon)
             elif model_name == "wma_fallback":

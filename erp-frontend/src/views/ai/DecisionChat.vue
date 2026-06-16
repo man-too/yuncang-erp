@@ -27,7 +27,9 @@
         type="textarea" :rows="2"
         placeholder="输入问题，如「分析库存风险」「对比供应商」..."
         resize="none"
-        @keydown.enter.exact.prevent="handleSend"
+        @compositionstart="isComposing = true"
+        @compositionend="isComposing = false"
+        @keydown.enter.exact.prevent="onEnterKey"
       />
       <div class="input-footer">
         <el-button text size="small" @click="store.clearSession()" :disabled="store.messages.length === 0">
@@ -53,6 +55,7 @@ import QuickActions from './QuickActions.vue'
 const emit = defineEmits<{ panelFocus: [type: string] }>()
 const store = useChatStore()
 const inputText = ref('')
+const isComposing = ref(false)  // P1-6 修复：IME 组合输入状态
 const msgContainer = ref<HTMLElement>()
 
 function scrollToBottom() {
@@ -70,6 +73,12 @@ watch(() => store.messages.length, () => {
     window.dispatchEvent(new Event('resize'))
   })
 })
+
+// P1-6 修复：IME 组合输入期间不触发发送
+function onEnterKey() {
+  if (isComposing.value) return
+  handleSend()
+}
 
 async function handleSend() {
   if (!inputText.value.trim() || store.isLoading) return

@@ -129,7 +129,7 @@ function computePrediction(history: number[]): number[] {
   // Compute micro-volatility from last 7 days
   const last7 = history.slice(-7)
   const avg = last7.reduce((s, v) => s + v, 0) / last7.length
-  const stdDev = Math.sqrt(last7.reduce((s, v) => s + (v - avg) ** 2, 0) / 7)
+  const stdDev = Math.sqrt(last7.reduce((s, v) => s + (v - avg) ** 2, 0) / last7.length)
   const volatility = stdDev * 0.3
   return Array.from({ length: 7 }, (_, i) => {
     const noise = Math.sin(i * 2.7 + 1.3) * volatility
@@ -359,6 +359,15 @@ const loadAggregateData = async () => {
   }
 }
 
+// P1-9 修复：类型守卫，后端 salesHistory 按 product_id 查询时返回数组，否则返回 {monthly_data, top_products}
+async function loadProductDailyData(params: any): Promise<any[]> {
+  const raw: any = await aiApi.salesHistory(params)
+  if (Array.isArray(raw)) return raw
+  // 如果返回的是 aggregate shape，降级为空数组
+  if (raw && typeof raw === 'object' && raw.monthly_data) return []
+  return []
+}
+
 // Load product-specific data
 const loadProductData = async () => {
   if (!filterProductId.value) return
@@ -374,7 +383,7 @@ const loadProductData = async () => {
     } else {
       params.days = daysMap[timeRange.value] || 30
     }
-    productDailyData.value = (await aiApi.salesHistory(params) as any) || []
+    productDailyData.value = await loadProductDailyData(params)
 
     // LLM prediction
     try {
@@ -444,12 +453,18 @@ const selectTopProduct = (item: any) => {
 }
 
 onMounted(async () => {
-  // Load product list
-  const res: any = await productApi.list({ page: 1, page_size: 100 })
-  products.value = res.items || []
+  // P0-3 修复：try/catch 兜底，避免初始化失败白屏
+  try {
+    // Load product list
+    const res: any = await productApi.list({ page: 1, page_size: 100 })
+    products.value = res.items || []
 
-  // Load aggregate data (default view)
-  await loadAggregateData()
+    // Load aggregate data (default view)
+    await loadAggregateData()
+  } catch (e: any) {
+    console.warn('[SalesForecastPanel] init failed', e)
+    ElMessage.error('销售预测面板加载失败，请重试')
+  }
 })
 </script>
 
