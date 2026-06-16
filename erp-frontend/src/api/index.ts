@@ -18,15 +18,17 @@ http.interceptors.request.use((config) => {
 })
 
 // 响应拦截器：统一错误处理
+// P1-12 修复：支持 silent 选项，避免双重错误提示
 http.interceptors.response.use(
   (response) => response.data,
   (error) => {
+    const silent = error.config?.silent || error.config?.headers?.['X-Silent']
     if (error.response?.status === 401) {
       localStorage.removeItem('token')
       router.push('/login')
-      ElMessage.error('登录已过期，请重新登录')
+      if (!silent) ElMessage.error('登录已过期，请重新登录')
     } else {
-      ElMessage.error(error.response?.data?.detail || '请求失败')
+      if (!silent) ElMessage.error(error.response?.data?.detail || '请求失败')
     }
     return Promise.reject(error)
   },
@@ -158,6 +160,12 @@ export const aiApi = {
   /** 补货量结构化推荐：ROP 基线 + AI 因素修正 */
   replenishRecommend: (productIds: number[]) =>
     http.post('/ai/replenish-recommend', { product_ids: productIds }),
+  /** 需求预测 (Darts/Prophet) */
+  forecast: (data: { product_ids: number[]; horizon_days?: number; model?: string }) =>
+    http.post('/ai/forecast', data),
+  /** 预测回测：评估各模型历史表现 */
+  forecastBacktest: (data: { product_ids: number[]; train_days?: number; test_days?: number; models?: string[] }) =>
+    http.post('/ai/forecast/backtest', data),
   /** 供应商综合评分 */
   supplierScore: (data?: { supplier_ids?: number[] }) => http.post('/ai/supplier-score', data),
   /** 天气查询 */

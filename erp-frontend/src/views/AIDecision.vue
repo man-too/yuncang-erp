@@ -46,7 +46,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, shallowReactive } from 'vue'
+import { ref, onMounted, reactive } from 'vue'
 import { aiApi } from '@/api'
 import PurchaseDecisionWizard from '@/views/ai/PurchaseDecisionWizard.vue'
 import DecisionChat from '@/views/ai/DecisionChat.vue'
@@ -58,7 +58,8 @@ const historyOpen = ref(false)
 const historyList = ref<any[]>([])
 const historyLoading = ref(false)
 
-const summaryCards = shallowReactive([
+// P1-8 修复：shallowReactive 只跟踪顶层引用，内部 value 赋值不触发更新；改用 reactive
+const summaryCards = reactive([
   { title: 'AI 决策总数', value: 0 },
   { title: '高置信度建议', value: 0 },
   { title: '库存预警', value: 0 },

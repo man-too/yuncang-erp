@@ -36,6 +36,15 @@ export const useChatStore = defineStore('chat', () => {
   const conversationId = ref('')
   const messages = ref<ChatMessage[]>([])
   const isLoading = ref(false)
+  // P0-2 修复：跨调用追踪当前请求，便于 clearSession / unmount 中止
+  let currentController: AbortController | null = null
+
+  function abortCurrentRequest() {
+    if (currentController) {
+      try { currentController.abort() } catch { /* ignore */ }
+      currentController = null
+    }
+  }
 
   function uuid() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -62,6 +71,13 @@ export const useChatStore = defineStore('chat', () => {
     messages.value.push(assistantMsg)
     isLoading.value = true
 
+    // P0-2 修复：AbortController 用于 unmount / clearSession 时取消请求
+    abortCurrentRequest()
+    const controller = new AbortController()
+    currentController = controller
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    let aborted = false
+
     try {
       const apiMessages = messages.value
         .filter(m => m.role !== 'system' && m.id !== assistantMsg.id)
@@ -74,6 +90,7 @@ export const useChatStore = defineStore('chat', () => {
           'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({ messages: apiMessages, conversation_id: conversationId.value }),
+        signal: controller.signal,
       })
       if (!res.ok || !res.body) {
         throw new Error(`HTTP ${res.status}`)
@@ -81,10 +98,12 @@ export const useChatStore = defineStore('chat', () => {
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
-      const timeoutId = setTimeout(() => {
-        reader.cancel()
+      // P1-5 修复：timeoutId 提到外层作用域，catch/finally 都能 clear
+      timeoutId = setTimeout(() => {
+        aborted = true
+        try { reader.cancel() } catch { /* ignore */ }
+        try { controller.abort() } catch { /* ignore */ }
         if (!assistantMsg.content) assistantMsg.content = '响应超时，请重试。'
-        isLoading.value = false
       }, 30000)
       while (true) {
         const { done, value } = await reader.read()
@@ -95,11 +114,14 @@ export const useChatStore = defineStore('chat', () => {
         for (const eventStr of events) {
           if (!eventStr.trim()) continue
           const lines = eventStr.split('\n')
-          let eventType = '', eventData = ''
+          let eventType = ''
+          // P1-4 修复：累加多行 data: 而非只保留最后一条
+          const dataLines: string[] = []
           for (const line of lines) {
             if (line.startsWith('event: ')) eventType = line.slice(7)
-            if (line.startsWith('data: ')) eventData = line.slice(6)
+            if (line.startsWith('data: ')) dataLines.push(line.slice(6))
           }
+          const eventData = dataLines.join('\n')
           if (eventType === 'blocks') {
             try {
               const parsed = JSON.parse(eventData)
@@ -115,7 +137,10 @@ export const useChatStore = defineStore('chat', () => {
             } catch { /* not valid JSON, use raw text */ }
             assistantMsg.content += text
           } else if (eventType === 'done') {
-            clearTimeout(timeoutId)
+            if (timeoutId !== null) {
+              clearTimeout(timeoutId)
+              timeoutId = null
+            }
             try {
               const doneData = JSON.parse(eventData)
               if (doneData.conversation_id) conversationId.value = doneData.conversation_id
@@ -123,10 +148,17 @@ export const useChatStore = defineStore('chat', () => {
           }
         }
       }
-      clearTimeout(timeoutId)
-    } catch {
-      if (!assistantMsg.content) assistantMsg.content = '抱歉，请求失败，请稍后重试。'
+    } catch (e: any) {
+      // 静默处理 AbortError（用户主动取消或超时）
+      if (e?.name !== 'AbortError' && !aborted && !assistantMsg.content) {
+        assistantMsg.content = '抱歉，请求失败，请稍后重试。'
+      }
     } finally {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId)
+        timeoutId = null
+      }
+      if (currentController === controller) currentController = null
       isLoading.value = false
     }
   }
@@ -308,94 +340,57 @@ export const useChatStore = defineStore('chat', () => {
       let buffer = ''
       let gotBlocks = false
 
+      // P1-4 修复：以 \n\n 切分事件块，块内多行 data: 累加
+      const dispatchEvent = (eventType: string, dataPayload: string) => {
+        const msg = messages.value.find(m => m.id === assistantId)
+        if (!msg) return
+        if (eventType === 'blocks') {
+          try {
+            const blocks = JSON.parse(dataPayload)
+            if (Array.isArray(blocks)) {
+              msg.blocks = blocks.map((b: any) => normalizeBlock(b))
+              gotBlocks = true
+            }
+          } catch { /* ignore parse error */ }
+        } else if (eventType === 'content_delta') {
+          let text = dataPayload
+          try {
+            const parsed = JSON.parse(dataPayload)
+            if (typeof parsed === 'string') text = parsed
+            else if (typeof parsed === 'object' && parsed !== null) text = JSON.stringify(parsed)
+          } catch { /* not valid JSON */ }
+          msg.content += text
+        }
+      }
+
+      const consumeBuffer = (final: boolean) => {
+        const events = buffer.split('\n\n')
+        if (!final) {
+          buffer = events.pop() || ''
+        } else {
+          buffer = ''
+        }
+        for (const eventStr of events) {
+          if (!eventStr.trim()) continue
+          const lines = eventStr.split('\n')
+          let evt = ''
+          const dataLines: string[] = []
+          for (const line of lines) {
+            if (line.startsWith('event: ')) evt = line.slice(7).trim()
+            else if (line.startsWith('data: ')) dataLines.push(line.slice(6))
+          }
+          if (evt) dispatchEvent(evt, dataLines.join('\n'))
+        }
+      }
+
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
-
         buffer += decoder.decode(value, { stream: true })
-
-        // Parse SSE events from buffer
-        const lines = buffer.split('\n')
-        // Keep the last incomplete line in buffer
-        buffer = lines.pop() || ''
-
-        let currentEvent = ''
-        let currentData = ''
-
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            currentEvent = line.slice(7).trim()
-          } else if (line.startsWith('data: ')) {
-            currentData = line.slice(6)
-          } else if (line === '' && currentEvent) {
-            // Empty line = end of event
-            const msg = messages.value.find(m => m.id === assistantId)
-            if (!msg) continue
-
-            if (currentEvent === 'blocks') {
-              try {
-                const blocks = JSON.parse(currentData)
-                if (Array.isArray(blocks)) {
-                  msg.blocks = blocks.map((b: any) => normalizeBlock(b))
-                  gotBlocks = true
-                }
-              } catch { /* ignore parse error */ }
-            } else if (currentEvent === 'content_delta') {
-              // Backend always JSON-encodes the data field
-              let text = currentData
-              try {
-                const parsed = JSON.parse(currentData)
-                if (typeof parsed === 'string') text = parsed
-                else if (typeof parsed === 'object' && parsed !== null) text = JSON.stringify(parsed)
-              } catch { /* not valid JSON, use raw text */ }
-              msg.content += text
-            } else if (currentEvent === 'done') {
-              // Stream complete
-            }
-
-            currentEvent = ''
-            currentData = ''
-          }
-        }
-
-        // Process any remaining complete event in buffer
-        if (buffer.includes('\n\n')) {
-          // Re-process next iteration
-        }
+        consumeBuffer(false)
       }
-
-      // Process any remaining data in buffer
-      if (buffer.trim()) {
-        const remainingLines = buffer.split('\n')
-        let evt = ''
-        let dat = ''
-        for (const line of remainingLines) {
-          if (line.startsWith('event: ')) evt = line.slice(7).trim()
-          else if (line.startsWith('data: ')) dat = line.slice(6)
-        }
-        if (evt && dat) {
-          const msg = messages.value.find(m => m.id === assistantId)
-          if (msg) {
-            if (evt === 'blocks') {
-              try {
-                const blocks = JSON.parse(dat)
-                if (Array.isArray(blocks)) {
-                  msg.blocks = blocks.map((b: any) => normalizeBlock(b))
-                  gotBlocks = true
-                }
-              } catch { /* ignore */ }
-            } else if (evt === 'content_delta') {
-              let text = dat
-              try {
-                const parsed = JSON.parse(dat)
-                if (typeof parsed === 'string') text = parsed
-                else if (typeof parsed === 'object' && parsed !== null) text = JSON.stringify(parsed)
-              } catch { /* not valid JSON */ }
-              msg.content += text
-            }
-          }
-        }
-      }
+      // 处理流末尾残留
+      if (buffer.trim()) consumeBuffer(true)
 
       // If we got at least blocks, consider it a success
       return gotBlocks || messages.value.find(m => m.id === assistantId)?.content !== ''
@@ -420,8 +415,10 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function clearSession() {
+    abortCurrentRequest()
     messages.value = []
     conversationId.value = ''
+    isLoading.value = false
   }
 
   return {
@@ -434,5 +431,6 @@ export const useChatStore = defineStore('chat', () => {
     executeAction,
     initConversation,
     clearSession,
+    abortCurrentRequest,
   }
 })

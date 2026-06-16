@@ -6,6 +6,7 @@
 """
 
 import math
+import logging
 from datetime import datetime, timedelta, date
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -15,6 +16,8 @@ from app.models.supplier import Supplier, SupplierEvaluation
 from app.models.inventory import Inventory, InventoryRecord
 from app.models.purchase import PurchaseOrder, PurchaseOrderItem, PurchaseInbound, PurchaseOrderStatus
 from app.models.sale import SaleOrder, SaleOrderItem, SaleOrderStatus
+
+logger = logging.getLogger(__name__)
 
 
 # ────────────────────────────────────────────
@@ -27,6 +30,13 @@ _ABC_Z = {
     "B": 1.28,   # 90%
     "C": 1.04,   # 85%
 }
+
+
+def _should_use_forecast(override: bool | None = None) -> bool:
+    from app.config import settings
+    if override is not None:
+        return override
+    return settings.FORECAST_ENABLED
 
 
 def _classify_abc(product_id: int, db: Session) -> str:
@@ -79,19 +89,25 @@ def calc_reorder_point(
     product_id: int,
     db: Session,
     supplier_id: int | None = None,
+    use_forecast: bool | None = None,
 ) -> dict:
     """计算再订货点 (ROP)
 
     ROP = avg_daily_sales × lead_time + safety_stock
     safety_stock = z × σ_daily × √(lead_time)
+
+    当 use_forecast=True 时，用 Darts/Prophet 预测替换简单均值，
+    加权融合：w × forecast + (1-w) × formula
     """
     product = db.get(Product, product_id)
     if not product:
         return {"error": f"产品 {product_id} 不存在"}
 
-    # ── lead_time ──
+    # ── 产品级交期覆盖 ──
     lead_time = 7  # 默认 7 天
-    if supplier_id:
+    if product.lead_time_override is not None:
+        lead_time = product.lead_time_override
+    elif supplier_id:
         supplier = db.get(Supplier, supplier_id)
         if supplier and supplier.delivery_lead_time:
             lead_time = supplier.delivery_lead_time
@@ -257,16 +273,35 @@ def calc_reorder_point(
     z = _ABC_Z.get(abc, 1.04)
 
     safety_stock = z * std_daily * math.sqrt(lead_time)
+
+    # ── 预测融合 ──
+    forecast_result = None
+    if _should_use_forecast(use_forecast):
+        try:
+            from app.services.forecast_service import forecast_product_demand
+            forecast_result = forecast_product_demand(product_id, db, horizon_days=int(lead_time))
+        except Exception as e:
+            logger.warning(f"Forecast failed for product {product_id}: {e}")
+
+    avg_daily, safety_stock, forecast_fields = _blend_forecast_into_rop(
+        avg_daily, safety_stock, forecast_result, z
+    )
+
     rop = avg_daily * lead_time + safety_stock
-    suggested_qty = max(round(rop) - int(current_qty) - int(in_transit_qty), 0)
+    # ROP 驱动的建议量；若库存低于 min_stock 则至少补到 min_stock
+    rop_based = max(round(rop) - int(current_qty) - int(in_transit_qty), 0)
+    min_stock_gap = max(round(product.min_stock or 0) - int(current_qty) - int(in_transit_qty), 0)
+    raw_suggested = max(rop_based, min_stock_gap)
+    box_qty = product.box_qty or 1
+    suggested_qty = math.ceil(raw_suggested / box_qty) * box_qty if raw_suggested > 0 else 0
 
     return {
         "product_id": product_id,
         "product_name": product.name,
-        "rop": round(rop, 2),
+        "rop": int(round(rop)),
         "avg_daily_sales": round(avg_daily, 2),
         "lead_time": lead_time,
-        "safety_stock": round(safety_stock, 2),
+        "safety_stock": int(round(safety_stock)),
         "service_level": {"A": "95%", "B": "90%", "C": "85%"}[abc],
         "abc_class": abc,
         # 新增字段（P0 状态快照）
@@ -279,6 +314,7 @@ def calc_reorder_point(
         "trend_change_pct": round(change_pct, 1),
         "demand_desc": demand_desc,
         "suggested_qty": suggested_qty,
+        **forecast_fields,
     }
 
 
@@ -375,9 +411,40 @@ def _std(values: list[float]) -> float:
     return math.sqrt(sum((x - mean) ** 2 for x in values) / n)
 
 
+def _blend_forecast_into_rop(
+    avg_daily: float,
+    safety_stock: float,
+    forecast_result: "ForecastResult | None",
+    z: float,
+) -> tuple[float, float, dict]:
+    """预测融合：用置信度加权混合预测值和公式值
+
+    Returns: (blended_avg_daily, blended_safety_stock, forecast_fields)
+    """
+    if forecast_result is None or forecast_result.confidence_score < 0.3:
+        return avg_daily, safety_stock, {}
+
+    w = forecast_result.confidence_score
+    f_avg = forecast_result.avg_daily_forecast
+    f_ss = z * (forecast_result.avg_daily_high - forecast_result.avg_daily_low) / 2
+    blended_avg = w * f_avg + (1 - w) * avg_daily
+    blended_ss = w * f_ss + (1 - w) * safety_stock
+    fields = {
+        "forecast_avg_daily": round(forecast_result.avg_daily_forecast, 2),
+        "forecast_model": forecast_result.model_used,
+        "forecast_confidence_low": round(forecast_result.avg_daily_low, 2),
+        "forecast_confidence_mid": round(forecast_result.avg_daily_forecast, 2),
+        "forecast_confidence_high": round(forecast_result.avg_daily_high, 2),
+        "forecast_seasonality": forecast_result.seasonality_type,
+        "forecast_confidence_score": forecast_result.confidence_score,
+    }
+    return blended_avg, blended_ss, fields
+
+
 def batch_calc_reorder_point(
     product_ids: list[int],
     db: Session,
+    use_forecast: bool | None = None,
 ) -> dict[int, dict]:
     """批量计算再订货点 (ROP)，避免逐个查询的开销"""
     from app.models.product import Product
@@ -388,6 +455,15 @@ def batch_calc_reorder_point(
 
     if not product_ids:
         return {}
+
+    # ── 批量预测（可选）──
+    forecast_map: dict[int, "ForecastResult"] = {}
+    if _should_use_forecast(use_forecast):
+        try:
+            from app.services.forecast_service import forecast_batch_demand
+            forecast_map = forecast_batch_demand(product_ids, db, horizon_days=30)
+        except Exception as e:
+            logger.warning(f"Batch forecast failed: {e}")
 
     products = {p.id: p for p in db.query(Product).filter(Product.id.in_(product_ids)).all()}
 
@@ -418,6 +494,11 @@ def batch_calc_reorder_point(
     # 没找到采购记录的默认7天
     for pid in product_ids:
         lead_time_map.setdefault(pid, 7)
+
+    # 产品级交期覆盖
+    for pid, prod in products.items():
+        if prod.lead_time_override is not None:
+            lead_time_map[pid] = prod.lead_time_override
 
     # ── 当前库存（按产品聚合所有仓库）──
     inv_rows = (
@@ -579,6 +660,7 @@ def batch_calc_reorder_point(
 
         quantities = sales_map.get(pid, [])
         abc = abc_map.get(pid, "C")
+        z = _ABC_Z_BATCH.get(abc, 1.04)
 
         if not quantities:
             rop_val = prod.min_stock or 0
@@ -595,19 +677,33 @@ def batch_calc_reorder_point(
             else:
                 std_daily = avg_daily * 0.3 if avg_daily > 0 else 0.0
 
-            z = _ABC_Z_BATCH.get(abc, 1.04)
             safety_stock = z * std_daily * math.sqrt(lt)
             rop_val = avg_daily * lt + safety_stock
 
-        suggested_qty = max(round(rop_val) - int(current_qty) - int(in_transit_qty), 0)
+        # ── 预测融合 ──
+        # P1-5 修复：仅在有销量历史时融合预测；新品/冷品保留 min_stock 语义
+        if quantities:
+            fr = forecast_map.get(pid)
+            avg_daily, safety_stock, batch_forecast_fields = _blend_forecast_into_rop(
+                avg_daily, safety_stock, fr, z
+            )
+            rop_val = avg_daily * lt + safety_stock
+        else:
+            batch_forecast_fields = {}
+
+        rop_based = max(round(rop_val) - int(current_qty) - int(in_transit_qty), 0)
+        min_stock_gap = max(round(prod.min_stock or 0) - int(current_qty) - int(in_transit_qty), 0)
+        raw_suggested = max(rop_based, min_stock_gap)
+        box_qty = prod.box_qty or 1
+        suggested_qty = math.ceil(raw_suggested / box_qty) * box_qty if raw_suggested > 0 else 0
 
         entry = {
             "product_id": pid,
             "product_name": prod.name,
-            "rop": round(rop_val, 2),
+            "rop": int(round(rop_val)),
             "avg_daily_sales": round(avg_daily, 2),
             "lead_time": lt,
-            "safety_stock": round(safety_stock, 2),
+            "safety_stock": int(round(safety_stock)),
             "service_level": _ABC_SERVICE.get(abc, "85%"),
             "abc_class": abc,
             # 新增字段（P0 状态快照）
@@ -620,6 +716,7 @@ def batch_calc_reorder_point(
             "trend_change_pct": round(change_pct, 1),
             "demand_desc": demand_desc,
             "suggested_qty": suggested_qty,
+            **batch_forecast_fields,
         }
         if not quantities:
             entry["warning"] = "近60天无销量数据，使用 min_stock 作为保守值"

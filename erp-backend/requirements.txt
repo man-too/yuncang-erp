@@ -17,3 +17,7 @@ redis==5.0.1
 celery==5.3.4
 pandas==2.1.4
 numpy==1.26.2
+# darts 依赖链较重（lightgbm, optuna 等），安装可能较慢；未安装时系统自动降级到 WMA/Naive
+darts>=0.29.0
+# prophet 在 Windows 上需要 C++ 编译器（Visual Studio Build Tools）；未安装时系统自动降级到 WMA/Naive
+prophet>=1.1.5

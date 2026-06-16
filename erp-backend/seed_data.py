@@ -12,6 +12,7 @@ from app.models.product import Product, ProductCategory
 from app.models.purchase import PurchaseOrder, PurchaseOrderItem
 from app.models.sale import Customer, SaleOrder, SaleOrderItem, SaleOutbound
 from app.models.inventory import Warehouse, Inventory
+from app.models.promotion import Promotion
 from app.utils.auth import hash_password
 
 db = SessionLocal()
@@ -155,4 +156,30 @@ db.commit()
 print('测试数据初始化完成！')
 print('管理员: admin / admin123')
 print('已创建: 4个供应商, 6个产品, 3个客户, 2个仓库, 库存数据, 1个采购订单, ~300个销售订单(6个月,每日数据)')
+
+# 10. 促销活动种子数据
+try:
+    promotions = [
+        Promotion(name='双11大促', start_date=date(2026, 11, 1), end_date=date(2026, 11, 11),
+                  promotion_type='discount', discount_pct=20.0, product_ids=[1, 2, 3],
+                  expected_lift_pct=150.0, is_active=True, remark='年度最大促销活动'),
+        Promotion(name='618年中大促', start_date=date(2026, 6, 1), end_date=date(2026, 6, 18),
+                  promotion_type='discount', discount_pct=15.0, product_ids=[1, 2],
+                  expected_lift_pct=100.0, is_active=True, remark='年中大型促销'),
+        Promotion(name='店庆活动', start_date=date(2026, 3, 15), end_date=date(2026, 3, 22),
+                  promotion_type='discount', discount_pct=10.0, product_ids=[1, 3, 4],
+                  expected_lift_pct=50.0, is_active=True, remark='门店周年庆'),
+        Promotion(name='清仓特卖', start_date=date(2026, 1, 5), end_date=date(2026, 1, 15),
+                  promotion_type='clearance', discount_pct=30.0, product_ids=[5],
+                  expected_lift_pct=80.0, is_active=True, remark='库存清仓处理'),
+        Promotion(name='闪购日', start_date=date(2026, 12, 12), end_date=date(2026, 12, 12),
+                  promotion_type='flash', discount_pct=25.0, product_ids=[2, 4],
+                  expected_lift_pct=120.0, is_active=True, remark='12.12限时闪购'),
+    ]
+    db.add_all(promotions)
+    db.commit()
+    print(f'促销活动创建: {len(promotions)}条')
+except Exception as e:
+    db.rollback()
+    print(f'促销活动跳过(可能已存在): {e}')
 db.close()

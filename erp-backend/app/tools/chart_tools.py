@@ -379,16 +379,34 @@ def _render_sales_trend(args: dict, db: Session) -> dict:
             qtys.append(sales_map.get(day_str, 0.0))
             current += timedelta(days=1)
 
-        # WMA prediction for next 7 days
-        wma_weights = [0.05, 0.08, 0.12, 0.15, 0.18, 0.22, 0.20]
-        last7 = qtys[-7:] if len(qtys) >= 7 else qtys
-        w = wma_weights[-len(last7):]
-        wma = sum(wi * v for wi, v in zip(w, last7)) / sum(w)
-        avg7 = sum(last7) / len(last7)
-        std7 = (sum((v - avg7) ** 2 for v in last7) / len(last7)) ** 0.5
-        volatility = std7 * 0.3
-        import math
-        pred_qtys = [max(0, round(wma + math.sin(i * 2.7 + 1.3) * volatility)) for i in range(7)]
+        # Demand forecast for next 7 days (Darts/Prophet with WMA fallback)
+        confidence_band = None  # {"low": [...], "high": [...]}
+        forecast_available = False
+
+        try:
+            from app.services.forecast_service import forecast_product_demand
+            forecast_result = forecast_product_demand(product_id, db, horizon_days=7)
+            if forecast_result:
+                pred_qtys = [max(0, round(v)) for v in forecast_result.forecast_mid[:7]]
+                confidence_band = {
+                    "low": [max(0, round(v)) for v in forecast_result.forecast_low[:7]],
+                    "high": [max(0, round(v)) for v in forecast_result.forecast_high[:7]],
+                }
+                forecast_available = True
+        except Exception:
+            pass
+
+        if not forecast_available:
+            # Fallback: WMA + sin oscillation
+            wma_weights = [0.05, 0.08, 0.12, 0.15, 0.18, 0.22, 0.20]
+            last7 = qtys[-7:] if len(qtys) >= 7 else qtys
+            w = wma_weights[-len(last7):]
+            wma = sum(wi * v for wi, v in zip(w, last7)) / sum(w)
+            import math
+            avg7_fb = sum(last7) / len(last7)
+            std7_fb = (sum((v - avg7_fb) ** 2 for v in last7) / len(last7)) ** 0.5 if len(last7) >= 2 else 0.0
+            volatility = std7_fb * 0.3
+            pred_qtys = [max(0, round(wma + math.sin(i * 2.7 + 1.3) * volatility)) for i in range(7)]
         pred_days = []
         last_d = datetime.strptime(days[-1], "%Y-%m-%d")
         for i in range(1, 8):
@@ -404,7 +422,7 @@ def _render_sales_trend(args: dict, db: Session) -> dict:
             "chartType": "line",
             "data": {
                 "title": {
-                    "text": f"{product_name} — 日销量趋势（近90天 + 预测7天）",
+                    "text": f"{product_name} — 日销量趋势（近90天 + 预测7天）" + (" (⚠ 预测模型不可用，使用简单移动平均)" if not forecast_available else ""),
                     "left": "center",
                     "textStyle": {"fontSize": 14, "fontWeight": "bold"},
                 },
@@ -412,7 +430,7 @@ def _render_sales_trend(args: dict, db: Session) -> dict:
                     "trigger": "axis",
                     "axisPointer": {"type": "cross", "crossStyle": {"color": "#999"}},
                 },
-                "legend": {"data": ["历史销量", "预测销量"], "bottom": 0},
+                "legend": {"data": ["历史销量", "预测销量"] + (["预测下限", "预测上限"] if confidence_band else []), "bottom": 0},
                 "dataZoom": [
                     {"type": "inside", "start": 50, "end": 100},
                     {"type": "slider", "start": 50, "end": 100, "height": 20, "bottom": 30},
@@ -446,6 +464,25 @@ def _render_sales_trend(args: dict, db: Session) -> dict:
                         "areaStyle": {"color": "rgba(252,132,82,0.1)"},
                         "itemStyle": {"color": "#fc8452"},
                     },
+                    *([
+                        {
+                            "name": "预测下限",
+                            "type": "line",
+                            "smooth": True,
+                            "data": [None] * len(qtys) + confidence_band["low"],
+                            "lineStyle": {"color": "#fc8452", "width": 1, "type": "dotted", "opacity": 0.4},
+                            "showSymbol": False,
+                        },
+                        {
+                            "name": "预测上限",
+                            "type": "line",
+                            "smooth": True,
+                            "data": [None] * len(qtys) + confidence_band["high"],
+                            "lineStyle": {"color": "#fc8452", "width": 1, "type": "dotted", "opacity": 0.4},
+                            "showSymbol": False,
+                            "areaStyle": {"color": "rgba(252,132,82,0.06)"},
+                        },
+                    ] if confidence_band else []),
                 ],
             },
             "_render": True,

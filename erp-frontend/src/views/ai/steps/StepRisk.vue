@@ -216,8 +216,11 @@ const productRisks = computed(() => {
 // ----- Weather data (fallback if not in auditResult) -----
 
 const weatherData = ref<string | null>(null)
+const isFetchingWeather = ref(false)
 
 async function fetchWeather() {
+  if (isFetchingWeather.value) return
+  isFetchingWeather.value = true
   try {
     const res: any = await aiApi.weather({ city: '上海' })
     if (res) {
@@ -237,12 +240,19 @@ async function fetchWeather() {
     }
   } catch {
     // Weather is optional, silently ignore
+  } finally {
+    isFetchingWeather.value = false
   }
 }
 
 // ----- Risk audit -----
 
+// P1-11 修复：并发锁防止重复触发
+const isAuditing = ref(false)
+
 async function runAudit() {
+  if (isAuditing.value) return
+  isAuditing.value = true
   loading.value = true
   try {
     const res = await store.fetchAuditPlan()
@@ -255,6 +265,7 @@ async function runAudit() {
     ElMessage.warning('风险审核服务暂不可用')
   } finally {
     loading.value = false
+    isAuditing.value = false
   }
 }
 

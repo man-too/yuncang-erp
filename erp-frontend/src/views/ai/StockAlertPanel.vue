@@ -46,6 +46,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { inventoryApi, productApi, aiApi } from '@/api'
+import { ElMessage } from 'element-plus'
 
 const warehouses = ref<any[]>([])
 const products = ref<any[]>([])
@@ -111,10 +112,16 @@ const runAIAnalysis = async () => {
 watch(heatmapData, () => runAIAnalysis())
 
 onMounted(async () => {
-  const [whRes, prodRes]: any = await Promise.all([inventoryApi.warehouses.list(), productApi.list({ page: 1, page_size: 100 })])
-  warehouses.value = whRes || []
-  products.value = prodRes.items || []
-  await loadHeatmap()
+  // P0-3 修复：捕获初始化失败，避免整面板白屏
+  try {
+    const [whRes, prodRes]: any = await Promise.all([inventoryApi.warehouses.list(), productApi.list({ page: 1, page_size: 100 })])
+    warehouses.value = whRes || []
+    products.value = prodRes.items || []
+    await loadHeatmap()
+  } catch (e: any) {
+    console.warn('[StockAlertPanel] init failed', e)
+    ElMessage.error('库存预警面板加载失败，请重试')
+  }
 })
 </script>
 

@@ -54,6 +54,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { BarChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent, TitleComponent } from 'echarts/components'
 import { supplierApi, aiApi } from '@/api'
+import { ElMessage } from 'element-plus'
 
 use([CanvasRenderer, BarChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent])
 
@@ -112,9 +113,15 @@ const loadData = async () => {
 }
 
 onMounted(async () => {
-  const res: any = await supplierApi.list({ page: 1, page_size: 100 })
-  suppliers.value = res.items || []
-  await loadData()
+  // P0-3 修复：try/catch 兜底，避免初始化失败白屏
+  try {
+    const res: any = await supplierApi.list({ page: 1, page_size: 100 })
+    suppliers.value = res.items || []
+    await loadData()
+  } catch (e: any) {
+    console.warn('[SupplierAnalysisPanel] init failed', e)
+    ElMessage.error('供应商分析面板加载失败，请重试')
+  }
 })
 </script>
 
