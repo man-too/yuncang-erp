@@ -126,7 +126,13 @@ REPLENISHMENT_STRATEGY_HINT = """补货决策法则（供参考，根据实际�
 4. 趋势下降且变化幅度>20% → 在 suggested_qty 基础上下调 10-30%
 5. abc_class 为 C 类 + 趋势平稳 → 维持基线，不需要上调
 6. backlog_qty > 0 表示有未发货积压，应纳入紧急度判断
-分析时优先引用 demand_desc / rop / suggested_qty / trend 字段，不要自己重算公式。"""
+7. 若有 forecast_avg_daily 字段，优先使用预测日均需求而非历史均值
+8. 若 forecast_confidence_high 远高于 forecast_confidence_mid，说明需求不确定性高，应增加安全库存
+9. 若 forecast_seasonality 不为 none，说明存在季节性周期，需考虑提前备货
+10. 若回测结果显示某模型 WMAPE < 0.2，说明该模型预测可靠，可优先参考其预测值
+11. 若回测最优模型为 naive 而非 prophet，说明该产品季节性弱，Prophet 可能过拟合
+12. ensemble 模式下权重由回测表现动态决定，非固定值
+分析时优先引用 demand_desc / rop / suggested_qty / trend / forecast_avg_daily 字段，不要自己重算公式。"""
 
 # ── 供应商选择场景的策略注入 ──
 SUPPLIER_STRATEGY_HINT = """供应商选择优先级（工具已按 urgency 给出动态权重，weights_used 字段可见）：

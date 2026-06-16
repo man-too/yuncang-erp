@@ -102,6 +102,23 @@ class ForecastService:
         self.db = db
         self.config = config or settings
         self.cache = cache or MemoryCacheBackend()
+        # 延迟导入避免循环依赖
+        self._model_selector = None
+        self._weight_calculator = None
+
+    @property
+    def model_selector(self):
+        if self._model_selector is None:
+            from app.services.model_selector import ModelSelector
+            self._model_selector = ModelSelector(self.db)
+        return self._model_selector
+
+    @property
+    def weight_calculator(self):
+        if self._weight_calculator is None:
+            from app.services.model_selector import DynamicWeightCalculator
+            self._weight_calculator = DynamicWeightCalculator(self.db)
+        return self._weight_calculator
 
     # ── 公开接口 ────────────────────────────────────────────────
 
@@ -144,8 +161,9 @@ class ForecastService:
             self.cache.set(product_id, result)
             return result
 
-        # 选模型
-        model_type = self._pick_model(data_points, model_override)
+        # 选模型 — 使用 ModelSelector
+        selection = self.model_selector.select_model(product_id, data_points, model_override)
+        model_type = selection.model_name
 
         try:
             if model_type == "prophet":
@@ -166,7 +184,7 @@ class ForecastService:
                 except Exception as e:
                     logger.warning(f"[Forecast] Ensemble 中 Prophet 失败: {e}")
                 naive_r = self._run_naive(df, horizon)
-                result = self._run_ensemble(prophet_r, naive_r)
+                result = self._run_ensemble(prophet_r, naive_r, product_id=product_id)
 
             else:  # wma_fallback
                 result = self._run_wma(df, horizon)
@@ -176,6 +194,13 @@ class ForecastService:
             return None
 
         result.product_id = product_id
+
+        # 应用置信度微调
+        if result and selection.confidence_adjustment != 0:
+            result.confidence_score = round(
+                min(0.95, max(0.2, result.confidence_score + selection.confidence_adjustment)), 3
+            )
+
         self.cache.set(product_id, result)
         return result
 
@@ -263,7 +288,11 @@ class ForecastService:
     # ── 模型选择 ────────────────────────────────────────────────
 
     def _pick_model(self, data_points: int, model_override: str | None = None) -> str:
-        """根据数据量和配置选择模型"""
+        """根据数据量和配置选择模型
+
+        .. deprecated::
+            使用 ModelSelector.select_model 替代。本方法保留仅为向后兼容。
+        """
         if model_override and model_override != "auto":
             if model_override == "prophet" and data_points < self.config.FORECAST_MIN_DATA_DAYS:
                 logger.warning(
@@ -442,12 +471,19 @@ class ForecastService:
         self,
         prophet_result: ForecastResult | None,
         naive_result: ForecastResult,
+        product_id: int = 0,
     ) -> ForecastResult:
-        """融合 Prophet + Naive：Prophet 有季节性时权重 0.7，否则 0.5"""
+        """融合 Prophet + Naive：权重由 DynamicWeightCalculator 动态决定"""
         if prophet_result is None:
             return naive_result
 
-        w = 0.7 if prophet_result.seasonality_detected else 0.5
+        # 动态权重
+        seasonality = prophet_result.seasonality_detected
+        weights = self.weight_calculator.calc_ensemble_weights(
+            product_id=product_id or prophet_result.product_id,
+            seasonality_detected=seasonality,
+        )
+        w = weights.get("prophet", 0.5)
         n = min(len(prophet_result.forecast_mid), len(naive_result.forecast_mid))
         horizon = n
 
