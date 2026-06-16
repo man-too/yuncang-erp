@@ -158,6 +158,12 @@ export const aiApi = {
   /** 补货量结构化推荐：ROP 基线 + AI 因素修正 */
   replenishRecommend: (productIds: number[]) =>
     http.post('/ai/replenish-recommend', { product_ids: productIds }),
+  /** 需求预测 (Darts/Prophet) */
+  forecast: (data: { product_ids: number[]; horizon_days?: number; model?: string }) =>
+    http.post('/ai/forecast', data),
+  /** 预测回测：评估各模型历史表现 */
+  forecastBacktest: (data: { product_ids: number[]; train_days?: number; test_days?: number; models?: string[] }) =>
+    http.post('/ai/forecast/backtest', data),
   /** 供应商综合评分 */
   supplierScore: (data?: { supplier_ids?: number[] }) => http.post('/ai/supplier-score', data),
   /** 天气查询 */

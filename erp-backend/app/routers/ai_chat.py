@@ -499,6 +499,111 @@ def ai_supplier_score(
     return {"suppliers": calc_supplier_score(None, db)}
 
 
+@router.post("/forecast")
+def ai_forecast(
+    data: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """需求预测端点：Darts/Prophet 预测 + 置信区间
+
+    Input: {"product_ids": [int, ...], "horizon_days": 30, "model": "auto"}
+    Output: {"forecasts": {pid: {...}}, "model_info": str}
+    """
+    from app.services.forecast_service import forecast_batch_demand
+
+    product_ids = data.get("product_ids") if isinstance(data, dict) else None
+    if not isinstance(product_ids, list) or not product_ids:
+        raise HTTPException(status_code=400, detail="product_ids 不能为空")
+    try:
+        product_ids = [int(p) for p in product_ids]
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="product_ids 必须是整数列表")
+
+    horizon = int(data.get("horizon_days", 0)) or 30
+    model = data.get("model", "auto")
+
+    results = forecast_batch_demand(product_ids, db, horizon_days=horizon)
+    forecasts = {}
+    models_used = set()
+    for pid, fr in results.items():
+        models_used.add(fr.model_used)
+        forecasts[str(pid)] = {
+            "product_id": fr.product_id,
+            "model_used": fr.model_used,
+            "forecast_mid": [round(v, 2) for v in fr.forecast_mid],
+            "forecast_low": [round(v, 2) for v in fr.forecast_low],
+            "forecast_high": [round(v, 2) for v in fr.forecast_high],
+            "avg_daily_forecast": round(fr.avg_daily_forecast, 2),
+            "avg_daily_low": round(fr.avg_daily_low, 2),
+            "avg_daily_high": round(fr.avg_daily_high, 2),
+            "seasonality_detected": fr.seasonality_detected,
+            "seasonality_type": fr.seasonality_type,
+            "data_points": fr.data_points,
+            "confidence_score": fr.confidence_score,
+            "fallback_reason": fr.fallback_reason,
+        }
+
+    model_info = f"使用模型: {', '.join(models_used)}" if models_used else "无可用预测模型"
+    return {"forecasts": forecasts, "model_info": model_info}
+
+
+@router.post("/forecast/backtest")
+def ai_forecast_backtest(
+    data: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """回测端点：评估各预测模型在历史数据上的表现
+
+    Input: {"product_ids": [int, ...], "train_days": 60, "test_days": 14, "models": ["prophet","naive","wma_fallback"]}
+    Output: {"reports": {pid: {...}}, "summary": str}
+    """
+    from app.services.backtest_service import BacktestService
+
+    product_ids = data.get("product_ids") if isinstance(data, dict) else None
+    if not isinstance(product_ids, list) or not product_ids:
+        raise HTTPException(status_code=400, detail="product_ids 不能为空")
+    try:
+        product_ids = [int(p) for p in product_ids]
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="product_ids 必须是整数列表")
+
+    train_days = int(data.get("train_days", 0)) or 60
+    test_days = int(data.get("test_days", 0)) or 14
+    models = data.get("models")  # None = 全部
+
+    svc = BacktestService(db)
+    reports = svc.run_batch_backtest(product_ids, train_days=train_days, test_days=test_days, models=models)
+
+    output = {}
+    for pid, report in reports.items():
+        output[str(pid)] = {
+            "product_id": report.product_id,
+            "best_model": report.best_model,
+            "best_wmape": report.best_wmape,
+            "results": [
+                {
+                    "model_name": r.model_name,
+                    "mape": r.mape,
+                    "wmape": r.wmape,
+                    "smape": r.smape,
+                    "data_points": r.data_points,
+                    "run_time_ms": r.run_time_ms,
+                    "error": r.error,
+                }
+                for r in report.results
+            ],
+        }
+
+    best_models = [r.best_model for r in reports.values() if r.best_model]
+    summary = f"回测完成，{len(reports)}个产品，推荐模型分布: " + ", ".join(
+        f"{m}×{best_models.count(m)}" for m in set(best_models)
+    ) if best_models else "回测完成，无有效结果"
+
+    return {"reports": output, "summary": summary}
+
+
 @router.post("/replenish-recommend")
 def ai_replenish_recommend(
     data: dict,
@@ -525,6 +630,14 @@ def ai_replenish_recommend(
 
     # 1. 批量 ROP 基线
     baseline_map = batch_calc_reorder_point(product_ids, db) or {}
+
+    # 1.5. 批量预测（可选增强）
+    forecast_map = {}
+    try:
+        from app.services.forecast_service import forecast_batch_demand
+        forecast_map = forecast_batch_demand(product_ids, db, horizon_days=30)
+    except Exception as e:
+        logger.warning(f"[ReplenishRecommend] Forecast unavailable: {e}")
 
     if not baseline_map:
         return {"recommendations": [], "summary": "未找到对应产品数据"}
@@ -563,22 +676,25 @@ def ai_replenish_recommend(
 
     # 4. 构造 AI 提示词
     table_lines = [
-        "产品ID | 产品名 | 当前库存 | ROP | 建议(基线) | 趋势 | 趋势变化% | ABC"
+        "产品ID | 产品名 | 当前库存 | ROP | 建议(基线) | 趋势 | 趋势变化% | ABC | 预测日均 | 预测区间"
     ]
     for pid in product_ids:
         b = baseline_map.get(pid)
         if not b:
             continue
+        fr = forecast_map.get(pid)
+        f_avg = f"{fr.avg_daily_forecast:.1f}" if fr else "-"
+        f_range = f"[{fr.avg_daily_low:.1f},{fr.avg_daily_high:.1f}]" if fr else "-"
         table_lines.append(
             f"{pid} | {b.get('product_name','')} | "
             f"{b.get('current_qty',0)} | {b.get('rop',0)} | "
             f"{b.get('suggested_qty',0)} | {b.get('trend','平稳')} | "
-            f"{b.get('trend_change_pct',0)}% | {b.get('abc_class','C')}"
+            f"{b.get('trend_change_pct',0)}% | {b.get('abc_class','C')} | {f_avg} | {f_range}"
         )
     table_text = "\n".join(table_lines)
 
     prompt = (
-        "你是供应链补货决策专家。基于 ROP 基线数据，根据下列规则对每个产品给出最终建议补货量。\n\n"
+        "你是供应链补货决策专家。基于 ROP 基线数据和需求预测，根据下列规则对每个产品给出最终建议补货量。\n\n"
         "【产品数据】\n"
         f"{table_text}\n\n"
         "【调整规则】\n"
@@ -586,6 +702,9 @@ def ai_replenish_recommend(
         "- 趋势\"下降\"且 |trend_change_pct| > 20 → 在基线基础上下调 10%-30%\n"
         "- 缺货 (current_qty == 0) → 优先补足，可超过基线\n"
         "- C 类产品趋势平稳 → 维持基线\n"
+        "- 预测日均 > 历史avg_daily 且趋势上升 → 在基线基础上上调 15%-30%\n"
+        "- 预测区间上界 > ROP → 考虑提前补货，可上调\n"
+        "- 预测含季节性 → 按季节性调整提前量\n"
         "- 其他情况：维持基线\n\n"
         "【输出格式 - 严格遵守】\n"
         "对每个产品输出一行（不要换行打断）：\n"
