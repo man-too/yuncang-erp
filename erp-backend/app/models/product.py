@@ -36,6 +36,8 @@ class Product(Base):
     cost_price: Mapped[float] = mapped_column(Float, default=0.0)         # 成本价
     min_stock: Mapped[float] = mapped_column(Float, default=0.0)          # 最低库存预警
     max_stock: Mapped[float] = mapped_column(Float, default=0.0)          # 最高库存预警
+    lead_time_override: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 产品级交期（天），覆盖供应商交期
+    box_qty: Mapped[int] = mapped_column(Integer, default=1)              # 包装数量，建议量对齐整数倍
     barcode: Mapped[str] = mapped_column(String(100), default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     weather_sensitive: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # 是否受天气影响
