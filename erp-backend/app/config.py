@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     AI_AGENT_ENABLED: bool = True
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
 
+    # ── 预测服务配置 ──
+    FORECAST_ENABLED: bool = True
+    FORECAST_HORIZON_DAYS: int = 30
+    FORECAST_MIN_DATA_DAYS: int = 30
+    FORECAST_CACHE_TTL_HOURS: int = 1
+    FORECAST_MODEL: str = "auto"
+
     @property
     def cors_origins_list(self) -> List[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",")]

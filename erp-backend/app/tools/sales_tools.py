@@ -96,21 +96,31 @@ def _query_sales_history(args: dict, db: Session) -> dict:
     return {"items": items, "total_quantity": total_qty, "total_amount": total_amount, "days": days}
 
 
-def _wma_fallback(history: list[dict], days: int = 30, product_name: str | None = None) -> list[int]:
-    """加权移动平均预测：最近7天数据，权重 [0.20, 0.22, 0.18, 0.15, 0.12, 0.08, 0.05]（最近→最远递减），>7天时每7天衰减0.98"""
-    weights = [0.20, 0.22, 0.18, 0.15, 0.12, 0.08, 0.05]  # 最近→最远，权重递减
+def _wma_fallback(history: list[dict], days: int = 30, product_name: str | None = None, product_id: int | None = None, db: Session | None = None) -> list[int]:
+    """加权移动平均预测，优先使用 ForecastService（Prophet/NaiveSeasonal），不可用时回退经典 WMA"""
+    # 优先使用 ForecastService（db + product_id 可用时）
+    if db is not None and product_id is not None:
+        try:
+            from app.services.forecast_service import forecast_product_demand
+            result = forecast_product_demand(product_id, db, horizon_days=days)
+            if result is not None and result.forecast_mid:
+                return [max(0, round(v)) for v in result.forecast_mid]
+        except Exception:
+            pass
+
+    # 回退：经典 WMA
+    weights = [0.20, 0.22, 0.18, 0.15, 0.12, 0.08, 0.05]
     quantities = [h.get("quantity", 0) for h in history]
     recent = quantities[-7:]
-    # Pad with earliest value if fewer than 7 data points
     while len(recent) < 7:
         recent.insert(0, recent[0] if recent else 0)
-    w = weights[:len(recent)]  # 取前 len(recent) 个权重（最近数据对应最大权重）
+    w = weights[:len(recent)]
     wma = sum(wi * val for wi, val in zip(w, recent)) / sum(w)
     base = max(0, round(wma))
 
     predictions = []
     for i in range(days):
-        decay = 0.98 ** (i // 7)  # 每7天衰减一次
+        decay = 0.98 ** (i // 7)
         predictions.append(max(0, round(base * decay)))
     return predictions
 
@@ -143,8 +153,8 @@ def _forecast_sales(args: dict, db: Session) -> dict:
         history.append({"date": str(current), "quantity": sales_map.get(current, 0.0)})
         current += timedelta(days=1)
 
-    # Use WMA fallback as the deterministic prediction method
-    predictions = _wma_fallback(history, 30, product_name=prod.name)
+    # Use ForecastService (Prophet/NaiveSeasonal) with WMA fallback
+    predictions = _wma_fallback(history, 30, product_name=prod.name, product_id=prod.id, db=db)
 
     # Determine trend from recent data
     if len(history) >= 14:

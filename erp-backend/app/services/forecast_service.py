@@ -154,16 +154,18 @@ class ForecastService:
             if cached is not None:
                 return cached
 
-        # 读取产品级预测配置
+        # 读取产品级预测配置（字段可能尚未添加到模型，安全读取）
         from app.models.product import Product
         product = self.db.get(Product, product_id)
         product_model = None
         product_seasonality = None
         if product is not None:
-            if product.forecast_model and product.forecast_model != "auto":
-                product_model = product.forecast_model
-            if product.seasonality_type and product.seasonality_type != "auto":
-                product_seasonality = product.seasonality_type
+            product_model = getattr(product, 'forecast_model', None)
+            product_seasonality = getattr(product, 'seasonality_type', None)
+            if product_model == "auto":
+                product_model = None
+            if product_seasonality == "auto":
+                product_seasonality = None
 
         # 产品级 forecast_model 优先于调用方传入的 model_override
         effective_override = product_model or model_override

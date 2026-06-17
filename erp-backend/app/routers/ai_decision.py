@@ -583,10 +583,10 @@ def ai_sales_prediction(
         sales_data.append({"date": str(current), "qty": sales_map.get(current, 0.0)})
         current += timedelta(days=1)
 
-    # Use WMA fallback as deterministic prediction method
+    # Use ForecastService (Prophet/NaiveSeasonal) with WMA fallback
     from app.tools.sales_tools import _wma_fallback
     hist_for_wma = [{"date": d["date"], "quantity": d["qty"]} for d in sales_data]
-    predictions = _wma_fallback(hist_for_wma, 30)
+    predictions = _wma_fallback(hist_for_wma, 30, product_id=product_id, db=db)
 
     # Determine trend from recent data
     if len(hist_for_wma) >= 14:
@@ -619,7 +619,7 @@ def ai_sales_prediction(
         "prediction_dates": prediction_dates,
         "trend": trend,
         "seasonal_factor": "",
-        "suggestion": f"基于WMA预测未来30天需求约{sum(predictions)}件，趋势{trend}",
+        "suggestion": f"预测未来30天需求约{sum(predictions)}件，趋势{trend}",
         "confidence": confidence,
     }
 

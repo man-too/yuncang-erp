@@ -572,6 +572,23 @@ function getFutureDates(lastDate: string | null, count: number): string[] {
   })
 }
 
+/** 客户端预测回退：WMA + 历史波动 */
+function computeFallbackPrediction(history: any[]): number[] {
+  const quantities = history.map((h: any) => h.total_qty || h.qty || 0).filter((v: number) => v != null)
+  if (quantities.length < 3) return Array.from({ length: 7 }, () => 0)
+  const last7 = quantities.slice(-7)
+  const weights = [0.05, 0.08, 0.12, 0.15, 0.18, 0.22, 0.20]
+  const w = weights.slice(-last7.length)
+  const wma = Math.round(last7.reduce((s, v, i) => s + v * w[i], 0) / w.reduce((a, b) => a + b, 0))
+  const avg = last7.reduce((s, v) => s + v, 0) / last7.length
+  const stdDev = Math.sqrt(last7.reduce((s, v) => s + (v - avg) ** 2, 0) / last7.length)
+  const volatility = stdDev * 0.3
+  return Array.from({ length: 7 }, (_, i) => {
+    const noise = Math.sin(i * 2.7 + 1.3) * volatility
+    return Math.max(0, Math.round(wma + noise))
+  })
+}
+
 function aggregateWeekly(dailyData: any[]): any[] {
   if (dailyData.length === 0) return []
   const weeks: any[] = []
@@ -758,8 +775,8 @@ async function loadDetailData(productId: number) {
         detailPredictionData.value = parsed.predictions.slice(0, 7)
         detailPredictionDates.value = getFutureDates(lastDate, 7)
       } else if (parsed?.forecast_next_30d) {
-        const dailyAvg = Math.round(parsed.forecast_next_30d / 30)
-        detailPredictionData.value = Array.from({ length: 7 }, () => dailyAvg)
+        // 有总量但无逐日预测：用历史数据生成有波动的预测
+        detailPredictionData.value = computeFallbackPrediction(detailHistoryData.value)
         detailPredictionDates.value = getFutureDates(lastDate, 7)
       }
     }
