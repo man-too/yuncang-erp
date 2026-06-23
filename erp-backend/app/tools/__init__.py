@@ -133,14 +133,15 @@ def _calc_rop_handler(args: dict, db) -> dict:
     """ROP 计算 — 包装 calculation_service.calc_reorder_point"""
     product_id = args.get("product_id")
     supplier_id = args.get("supplier_id")
+    warehouse_id = args.get("warehouse_id")
     if product_id:
-        return _svc_calc_rop(product_id, db, supplier_id)
+        return _svc_calc_rop(product_id, db, supplier_id, warehouse_id=warehouse_id)
     from app.models.product import Product
     products = db.query(Product).filter(Product.is_active == True).all()
     results = []
     for p in products:
         try:
-            r = _svc_calc_rop(p.id, db, supplier_id)
+            r = _svc_calc_rop(p.id, db, supplier_id, warehouse_id=warehouse_id)
             results.append(r)
         except Exception:
             pass
@@ -971,6 +972,10 @@ _register(ToolMeta(
             "supplier_id": {
                 "type": "integer",
                 "description": "供应商ID（可选，默认取最近采购的供应商）",
+            },
+            "warehouse_id": {
+                "type": "integer",
+                "description": "仓库ID（可选，指定后按该仓库库存量计算 suggested_qty）",
             },
         },
         "required": [],

@@ -1,5 +1,5 @@
 <template>
-  <div class="step-inventory">
+  <div class="step-inventory" v-loading="store.isLoading" element-loading-text="加载库存数据...">
     <!-- Section 1: KPI Cards -->
     <div class="kpi-row">
       <div class="kpi-card">
@@ -21,8 +21,8 @@
     </div>
 
     <!-- Section 2: Product List sorted by risk -->
-    <div class="table-section">
-      <div class="table-header">
+    <div class="list-section">
+      <div class="list-header">
         <span class="section-title">库存产品清单</span>
         <div class="header-right">
           <el-select
@@ -53,153 +53,148 @@
         </div>
       </div>
 
-      <el-table
-        :data="filteredProducts"
-        max-height="480"
-        size="small"
-        stripe
-        row-key="product_id"
-        @selection-change="onSelectionChange"
-        ref="tableRef"
-        :row-class-name="rowClassName"
-        @row-click="onRowClick"
-        highlight-current-row
-      >
-        <el-table-column type="selection" width="40" />
-        <el-table-column label="状态" width="72" align="center">
-          <template #default="{ row }">
-            <el-tag :type="statusTagType(row)" size="small" effect="dark">
-              {{ statusLabel(row) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="product_name" label="产品名称" min-width="150" show-overflow-tooltip />
-        <el-table-column prop="product_code" label="编码" min-width="100" />
-        <el-table-column prop="warehouse_name" label="仓库" min-width="110" />
-        <el-table-column label="当前库存" min-width="90" align="right">
-          <template #default="{ row }">
-            <span :class="{ 'text-danger': row.current_qty < row.min_stock }">{{ row.current_qty }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="min_stock" label="安全库存" min-width="90" align="right" />
-        <el-table-column label="ROP" min-width="80" align="right">
-          <template #default="{ row }">
-            <span v-if="ropMap[row.product_id] != null" class="rop-cell">{{ ropMap[row.product_id] }}</span>
-            <span v-else class="rop-none">—</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="max_stock" label="最高库存" min-width="90" align="right" />
-        <el-table-column label="操作" width="130" align="center" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" size="small" @click.stop="toggleExpand(row)">
-              {{ expandedProductId === row.product_id ? '收起' : '详情' }}
-            </el-button>
-            <el-button link type="primary" size="small" @click.stop="openEditDialog(row)">编辑</el-button>
-            <el-button link type="danger" size="small" @click.stop="store.removeProduct(row.product_id)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <!-- Card List -->
+      <div v-if="filteredProducts.length === 0 && !store.isLoading" class="empty-state">
+        暂无低库存产品
+      </div>
 
-      <!-- Expandable Detail Panel -->
-      <div v-if="expandedProduct" class="expand-panel">
-        <div class="expand-header">
-          <span class="expand-title">{{ expandedProduct.product_name }} — 库存详情与销量预测</span>
-          <el-button link type="info" size="small" @click="expandedProductId = null">收起</el-button>
-        </div>
-
-        <!-- Stock Info -->
-        <div class="expand-stock-row">
-          <div class="stock-info-item">
-            <span class="stock-info-label">当前库存</span>
-            <span class="stock-info-value" :class="{ 'text-danger': expandedProduct.current_qty < expandedProduct.min_stock }">
-              {{ expandedProduct.current_qty }} {{ expandedProduct.unit }}
-            </span>
-          </div>
-          <div class="stock-info-item">
-            <span class="stock-info-label">安全库存</span>
-            <span class="stock-info-value">{{ expandedProduct.min_stock }} {{ expandedProduct.unit }}</span>
-          </div>
-          <div class="stock-info-item">
-            <span class="stock-info-label">最高库存</span>
-            <span class="stock-info-value">{{ expandedProduct.max_stock }} {{ expandedProduct.unit }}</span>
-          </div>
-          <div class="stock-info-item">
-            <span class="stock-info-label">缺口</span>
-            <span class="stock-info-value" :class="{ 'text-danger': expandedProduct.current_qty < expandedProduct.min_stock }">
-              {{ Math.max(0, expandedProduct.min_stock - expandedProduct.current_qty) }} {{ expandedProduct.unit }}
-            </span>
-          </div>
-        </div>
-
-        <!-- Sales Forecast Chart -->
-        <div class="expand-chart-section">
-          <div class="chart-toolbar">
-            <div class="time-tabs">
-              <div class="time-tab" :class="{ active: detailTimeRange === '7d' }" @click="setDetailTimeRange('7d')">近7天</div>
-              <div class="time-tab" :class="{ active: detailTimeRange === '30d' }" @click="setDetailTimeRange('30d')">近30天</div>
-              <div class="time-tab" :class="{ active: detailTimeRange === '3m' }" @click="setDetailTimeRange('3m')">近3个月</div>
-            </div>
-          </div>
-          <div v-loading="detailChartLoading" class="chart-area" style="height: 300px;">
-            <v-chart
-              v-if="!detailChartLoading && (detailHistoryData.length > 0 || detailPredictionData.length > 0)"
-              :key="`detail-chart-${expandedProductId}-${detailTimeRange}`"
-              :option="detailChartOption"
-              autoresize
-              style="height: 100%;"
+      <div v-else class="card-list">
+        <div
+          v-for="product in filteredProducts"
+          :key="product.product_id"
+          class="product-card"
+          :class="cardRiskClass(product)"
+        >
+          <!-- Card top row: checkbox + status tag + name + code + warehouse + ROP value + actions -->
+          <div class="card-header">
+            <el-checkbox
+              :model-value="isSelected(product.product_id)"
+              @change="(val: boolean) => onCheckChange(product.product_id, val)"
             />
-            <el-empty v-else-if="!detailChartLoading" description="暂无销量数据" :image-size="60" />
-          </div>
-        </div>
-
-        <!-- ROP Calculation Result -->
-        <div class="expand-rop-section">
-          <div class="rop-title">ROP 再订货点计算</div>
-          <div v-if="ropLoading" class="rop-loading" v-loading="true" element-loading-text="计算中..."></div>
-          <div v-else-if="ropResult" class="rop-grid">
-            <div class="rop-item">
-              <span class="rop-label">日均销量</span>
-              <span class="rop-value">{{ ropResult.avg_daily_sales ?? '—' }}</span>
-            </div>
-            <div class="rop-item">
-              <span class="rop-label">提前期(天)</span>
-              <span class="rop-value">{{ ropResult.lead_time ?? '—' }}</span>
-            </div>
-            <div class="rop-item">
-              <span class="rop-label">安全库存</span>
-              <span class="rop-value">{{ ropResult.safety_stock ?? '—' }}</span>
-            </div>
-            <div class="rop-item">
-              <span class="rop-label">再订货点(ROP)</span>
-              <span class="rop-value rop-value--highlight">{{ ropResult.rop ?? '—' }}</span>
-            </div>
-            <div class="rop-item">
-              <span class="rop-label">建议采购量</span>
-              <span class="rop-value rop-value--highlight">{{ ropResult.suggested_qty ?? '—' }}</span>
+            <el-tag :type="statusTagType(product)" size="small" effect="dark">
+              {{ statusLabel(product) }}
+            </el-tag>
+            <span class="card-name">{{ product.product_name }}</span>
+            <span class="card-code">{{ product.product_code }}</span>
+            <el-tag size="small" type="info">{{ product.warehouse_name }}</el-tag>
+            <span v-if="ropMap[product.product_id] != null" class="card-rop">
+              ROP: {{ ropMap[product.product_id] }}
+            </span>
+            <div class="card-actions">
+              <el-button link @click.stop="toggleExpand(product)">
+                {{ expandedProductId === product.product_id ? '收起' : '详情' }}
+              </el-button>
+              <el-button link @click.stop="openEditDialog(product)">编辑</el-button>
+              <el-button link type="danger" @click.stop="store.removeProduct(product.product_id)">删除</el-button>
             </div>
           </div>
-          <div v-else class="rop-placeholder">点击产品自动计算 ROP</div>
-        </div>
 
-        <!-- Purchase Quantity Input -->
-        <div class="expand-qty-row">
-          <span class="qty-label">采购数量：</span>
-          <el-input-number
-            v-model="expandedQuantity"
-            :min="0"
-            :precision="0"
-            size="default"
-            style="width: 180px;"
-          />
-          <span class="qty-unit">{{ expandedProduct.unit || '个' }}</span>
-          <span v-if="ropResult?.suggested_qty" class="qty-hint">
-            (ROP建议: {{ ropResult.suggested_qty }})
-          </span>
+          <!-- Card detail line: current qty / safety / max -->
+          <div class="card-stats">
+            <span>
+              当前: <strong :class="{ 'text-danger': product.current_qty < product.min_stock }">{{ product.current_qty }}</strong>
+            </span>
+            <span>安全: <strong>{{ product.min_stock }}</strong></span>
+            <span>最高: <strong>{{ product.max_stock }}</strong></span>
+          </div>
+
+          <!-- Expandable detail panel (only for the expanded product) -->
+          <div v-if="expandedProductId === product.product_id" class="expand-panel">
+            <!-- Stock info row -->
+            <div class="expand-stock-row">
+              <div class="stock-info-item">
+                <span class="stock-info-label">当前库存</span>
+                <span class="stock-info-value" :class="{ 'text-danger': product.current_qty < product.min_stock }">
+                  {{ product.current_qty }} {{ product.unit }}
+                </span>
+              </div>
+              <div class="stock-info-item">
+                <span class="stock-info-label">安全库存</span>
+                <span class="stock-info-value">{{ product.min_stock }} {{ product.unit }}</span>
+              </div>
+              <div class="stock-info-item">
+                <span class="stock-info-label">最高库存</span>
+                <span class="stock-info-value">{{ product.max_stock }} {{ product.unit }}</span>
+              </div>
+              <div class="stock-info-item">
+                <span class="stock-info-label">缺口</span>
+                <span class="stock-info-value" :class="{ 'text-danger': product.current_qty < product.min_stock }">
+                  {{ Math.max(0, product.min_stock - product.current_qty) }} {{ product.unit }}
+                </span>
+              </div>
+            </div>
+
+            <!-- Sales Forecast Chart -->
+            <div class="expand-chart-section">
+              <div class="chart-toolbar">
+                <div class="time-tabs">
+                  <div class="time-tab" :class="{ active: detailTimeRange === '7d' }" @click="setDetailTimeRange('7d')">近7天</div>
+                  <div class="time-tab" :class="{ active: detailTimeRange === '30d' }" @click="setDetailTimeRange('30d')">近30天</div>
+                  <div class="time-tab" :class="{ active: detailTimeRange === '3m' }" @click="setDetailTimeRange('3m')">近3个月</div>
+                </div>
+              </div>
+              <div v-loading="detailChartLoading" class="chart-area" style="height: 300px;">
+                <v-chart
+                  v-if="!detailChartLoading && (detailHistoryData.length > 0 || detailPredictionData.length > 0)"
+                  :key="`detail-chart-${expandedProductId}-${detailTimeRange}`"
+                  :option="detailChartOption"
+                  autoresize
+                  style="height: 100%;"
+                />
+                <el-empty v-else-if="!detailChartLoading" description="暂无销量数据" :image-size="60" />
+              </div>
+            </div>
+
+            <!-- ROP Calculation Result -->
+            <div class="expand-rop-section">
+              <div class="rop-title">ROP 再订货点计算</div>
+              <div v-if="ropLoading" class="rop-loading" v-loading="true" element-loading-text="计算中..."></div>
+              <div v-else-if="ropResult" class="rop-grid">
+                <div class="rop-item">
+                  <span class="rop-label">日均销量</span>
+                  <span class="rop-value">{{ ropResult.avg_daily_sales ?? '—' }}</span>
+                </div>
+                <div class="rop-item">
+                  <span class="rop-label">提前期(天)</span>
+                  <span class="rop-value">{{ ropResult.lead_time ?? '—' }}</span>
+                </div>
+                <div class="rop-item">
+                  <span class="rop-label">安全库存</span>
+                  <span class="rop-value">{{ ropResult.safety_stock ?? '—' }}</span>
+                </div>
+                <div class="rop-item">
+                  <span class="rop-label">再订货点(ROP)</span>
+                  <span class="rop-value rop-value--highlight">{{ ropResult.rop ?? '—' }}</span>
+                </div>
+                <div class="rop-item">
+                  <span class="rop-label">建议采购量</span>
+                  <span class="rop-value rop-value--highlight">{{ ropResult.suggested_qty ?? '—' }}</span>
+                </div>
+              </div>
+              <div v-else class="rop-placeholder">点击产品自动计算 ROP</div>
+            </div>
+
+            <!-- Purchase Quantity Input -->
+            <div class="expand-qty-row">
+              <span class="qty-label">采购数量：</span>
+              <el-input-number
+                v-model="expandedQuantity"
+                :min="0"
+                :precision="0"
+                size="default"
+                style="width: 180px;"
+              />
+              <span class="qty-unit">{{ product.unit || '个' }}</span>
+              <span v-if="ropResult?.suggested_qty" class="qty-hint">
+                (ROP建议: {{ ropResult.suggested_qty }})
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
-      <!-- Table Footer -->
-      <div class="table-footer">
+      <!-- List Footer -->
+      <div class="list-footer">
         <div class="footer-left">
           <el-button size="small" @click="store.selectAll()">全选</el-button>
           <el-button size="small" @click="store.deselectAll()">取消</el-button>
@@ -210,45 +205,6 @@
         <el-button type="primary" :disabled="store.allProducts.length === 0" @click="handleNextStep">
           下一步：供应商匹配
         </el-button>
-      </div>
-    </div>
-
-    <!-- Section 3: AI Intelligent Recommendation -->
-    <div v-if="aiRecommendationLoading || aiContent" class="ai-section">
-      <div class="section-row">
-        <span class="section-title">🤖 AI 智能分析</span>
-        <el-button v-if="!aiRecommendationLoading" size="small" @click="loadAiRecommendation">
-          重新分析
-        </el-button>
-      </div>
-
-      <!-- Loading -->
-      <div v-if="aiRecommendationLoading" class="ai-loading" v-loading="true" element-loading-text="AI 分析中…"></div>
-
-      <!-- Content -->
-      <div v-else-if="aiContent" class="ai-content-card">
-        <div class="ai-text" v-html="renderedContent"></div>
-
-        <!-- Render charts from AI blocks -->
-        <div v-for="(block, bi) in aiBlocks" :key="bi" class="ai-block">
-          <div v-if="block.type === 'chart'" class="ai-chart-wrapper">
-            <v-chart
-              v-if="block.data"
-              :key="`ai-chart-${bi}-${block.chartType || 'line'}-${(block.data.series || []).length}`"
-              :option="block.data"
-              autoresize
-              style="height: 320px;"
-            />
-          </div>
-          <div v-else-if="block.type === 'table'" class="ai-table-wrapper">
-            <el-table :data="block.rows || []" stripe size="small" border max-height="300">
-              <el-table-column
-                v-for="col in (block.columns || [])" :key="col.key"
-                :prop="col.key" :label="col.title" min-width="100" show-overflow-tooltip
-              />
-            </el-table>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -308,11 +264,13 @@ import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import { usePurchaseDecisionStore } from '@/stores/purchaseDecision'
+import { useChatStore } from '@/stores/chat'
 import { aiApi, inventoryApi, productApi } from '@/api'
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent])
 
 const store = usePurchaseDecisionStore()
+const chatStore = useChatStore()
 
 // =========================================================================
 // Section 1: KPI Cards
@@ -359,12 +317,21 @@ async function loadBatchRop() {
   if (ids.length === 0) return
   batchRopLoading.value = true
   try {
-    const res: any = await aiApi.batchRop({ product_ids: ids })
+    // Build warehouse_ids mapping: product_id → warehouse_id for per-warehouse ROP
+    const warehouseIds: Record<number, number> = {}
+    for (const p of store.allProducts) {
+      if (p.warehouse_id) {
+        warehouseIds[p.product_id] = p.warehouse_id
+      }
+    }
+    const res: any = await aiApi.batchRop({ product_ids: ids, warehouse_ids: warehouseIds })
     if (res) {
       const map: Record<number, number> = {}
-      for (const [pid, data] of Object.entries(res)) {
-        const d = data as any
-        map[Number(pid)] = d.rop ?? 0
+      const ropList: any[] = res.results || res.items || res.data || (Array.isArray(res) ? res : [])
+      for (const r of ropList) {
+        if (r && r.product_id != null) {
+          map[Number(r.product_id)] = r.rop ?? 0
+        }
       }
       ropMap.value = map
     }
@@ -380,30 +347,15 @@ function getRop(productId: number): number | null {
 }
 
 // =========================================================================
-// Section 3: AI Intelligent Recommendation
+// Section 3: AI Analysis → push to chat panel (text only)
 // =========================================================================
 
-const aiRecommendationLoading = ref(false)
-const aiContent = ref('')
-const aiBlocks = ref<any[]>([])
+let aiAnalysisPushed = false
 
-const renderedContent = computed(() => {
-  if (!aiContent.value) return ''
-  // Simple markdown-like rendering to HTML
-  let html = aiContent.value
-    .replace(/### (.+)/g, '<h4>$1</h4>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/- (.+)/g, '<li>$1</li>')
-    .replace(/\n\n/g, '</p><p>')
-    .replace(/\n/g, '<br>')
-  return `<p>${html}</p>`
-})
-
-async function loadAiRecommendation() {
+async function pushAiAnalysisToChat() {
   if (store.allProducts.length === 0) return
-  aiRecommendationLoading.value = true
-  aiContent.value = ''
-  aiBlocks.value = []
+  aiAnalysisPushed = true
+
   try {
     const productList = store.allProducts.slice(0, 10).map(p => {
       const rop = ropMap.value[p.product_id]
@@ -420,18 +372,15 @@ async function loadAiRecommendation() {
       ],
       conversation_id: '',
     })
-    if (res) {
-      aiContent.value = res.content || ''
-      aiBlocks.value = Array.isArray(res.blocks) ? res.blocks : []
+    if (res && res.content) {
+      chatStore.pushStepSummary('AI 库存分析', res.content)
     }
   } catch {
-    aiContent.value = 'AI 分析服务暂不可用'
-  } finally {
-    aiRecommendationLoading.value = false
+    chatStore.pushStepSummary('AI 库存分析', 'AI 分析服务暂不可用')
   }
 }
 
-// Watch for products to load → auto-expand first product, load ROP, and run AI analysis
+// Watch for products to load -> auto-expand first product, load ROP, and push AI analysis to chat
 watch(() => store.allProducts.length, (len) => {
   if (len > 0) {
     // Auto-expand the first (most risky) product
@@ -440,16 +389,16 @@ watch(() => store.allProducts.length, (len) => {
     }
     // Load batch ROP for all products (for accurate risk ranking)
     loadBatchRop()
-    // Run AI analysis if not already done
-    if (!aiContent.value && !aiRecommendationLoading.value) {
-      loadAiRecommendation()
+    // Push AI analysis to chat panel if not already done
+    if (!aiAnalysisPushed) {
+      pushAiAnalysisToChat()
     }
   }
 })
 
 function riskRank(item: { product_id: number; current_qty: number; min_stock: number; max_stock: number }): number {
   if (item.current_qty < item.min_stock) return 0 // 缺货
-  // 用 ROP 判断：高于安全库存但低于 ROP → 偏低(1)
+  // 用 ROP 判断：高于安全库存但低于 ROP -> 偏低(1)
   const rop = ropMap.value[item.product_id]
   if (rop != null && rop > item.min_stock && item.current_qty < rop) return 1 // 低于ROP
   if (rop != null && item.current_qty >= rop) return 2 // 正常（>= ROP）
@@ -502,9 +451,27 @@ function statusTagType(row: { product_id: number; current_qty: number; min_stock
   return ['danger', 'warning', 'success', 'info'][r] || 'info'
 }
 
-function rowClassName({ row }: { row: any }): string {
-  const r = riskRank(row)
-  return ['row-danger', 'row-warning', '', 'row-info'][r] || ''
+function cardRiskClass(item: { product_id: number; current_qty: number; min_stock: number; max_stock: number }): string {
+  const r = riskRank(item)
+  return ['card-danger', 'card-warning', '', 'card-info'][r] || ''
+}
+
+// =========================================================================
+// Selection
+// =========================================================================
+
+function isSelected(productId: number): boolean {
+  return store.selectedIds.has(productId)
+}
+
+function onCheckChange(productId: number, val: boolean) {
+  if (val) {
+    store.selectedIds = new Set([...store.selectedIds, productId])
+  } else {
+    const newSet = new Set(store.selectedIds)
+    newSet.delete(productId)
+    store.selectedIds = newSet
+  }
 }
 
 // =========================================================================
@@ -539,10 +506,6 @@ function toggleExpand(row: any) {
   } else {
     expandedProductId.value = row.product_id
   }
-}
-
-function onRowClick(row: any) {
-  toggleExpand(row)
 }
 
 // Watch expandedProductId to load detail data
@@ -730,12 +693,12 @@ async function setDetailTimeRange(range: '7d' | '30d' | '3m') {
 
 const ropLoading = ref(false)
 const ropResult = ref<any>(null)
-// P1-13 修复：去重缓存，防止 watch + onMounted + auto-expand 三重触发
+// P1-13 fix: deduplication cache to prevent watch + onMounted + auto-expand triple-triggering
 const _detailFetchKey = ref<string>('')
 
 async function loadDetailData(productId: number) {
   const key = `${productId}-${detailTimeRange.value}`
-  if (_detailFetchKey.value === key) return  // 相同请求正在进行中
+  if (_detailFetchKey.value === key) return  // same request already in progress
   _detailFetchKey.value = key
 
   detailChartLoading.value = true
@@ -749,10 +712,11 @@ async function loadDetailData(productId: number) {
     // Load sales history + prediction in parallel with ROP
     const daysMap = { '7d': 7, '30d': 30, '3m': 90 }
     const days = daysMap[detailTimeRange.value] || 30
+    const warehouseId = expandedProduct.value?.warehouse_id
     const [history, pred, rop] = await Promise.allSettled([
       aiApi.salesHistory({ product_id: productId, days }),
       aiApi.salesPrediction(productId),
-      store.fetchSuggestedQty(productId),
+      store.fetchSuggestedQty(productId, undefined, warehouseId),
     ])
 
     // Process history
@@ -775,7 +739,7 @@ async function loadDetailData(productId: number) {
         detailPredictionData.value = parsed.predictions.slice(0, 7)
         detailPredictionDates.value = getFutureDates(lastDate, 7)
       } else if (parsed?.forecast_next_30d) {
-        // 有总量但无逐日预测：用历史数据生成有波动的预测
+        // Has total but no daily predictions: generate volatile prediction from history
         detailPredictionData.value = computeFallbackPrediction(detailHistoryData.value)
         detailPredictionDates.value = getFutureDates(lastDate, 7)
       }
@@ -784,12 +748,12 @@ async function loadDetailData(productId: number) {
     // Process ROP
     if (rop.status === 'fulfilled' && rop.value) {
       ropResult.value = rop.value
-      // Set default purchase quantity from ROP suggestion
+      // Set default purchase quantity: prefer ROP suggestion, fallback to product's suggested_qty
       const suggested = rop.value.suggested_qty
-      if (suggested != null && suggested > 0) {
-        if (!(productId in store.quantities) || store.quantities[productId] === 0) {
-          store.quantities[productId] = suggested
-        }
+      const fallback = expandedProduct.value?.suggested_qty ?? 0
+      const qtyToSet = (suggested != null && suggested > 0) ? suggested : (fallback > 0 ? fallback : 0)
+      if (qtyToSet > 0 && (!(productId in store.quantities) || store.quantities[productId] === 0)) {
+        store.quantities[productId] = qtyToSet
       }
     }
   } catch {
@@ -797,7 +761,7 @@ async function loadDetailData(productId: number) {
   } finally {
     detailChartLoading.value = false
     ropLoading.value = false
-    _detailFetchKey.value = ''  // P1-13 修复：完成调用后清空缓存键
+    _detailFetchKey.value = ''  // P1-13 fix: clear cache key after completion
   }
 }
 
@@ -817,16 +781,6 @@ function handleNextStep() {
     }
   }
   store.nextStep()
-}
-
-// =========================================================================
-// Table selection
-// =========================================================================
-
-const tableRef = ref()
-
-function onSelectionChange(rows: any[]) {
-  store.selectedIds = new Set(rows.map(r => r.product_id))
 }
 
 // =========================================================================
@@ -997,14 +951,14 @@ onMounted(async () => {
 }
 
 /* ========================================================================== */
-/* Product List Table                                                         */
+/* Product List Section                                                        */
 /* ========================================================================== */
-.table-section {
+.list-section {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
-.table-header {
+.list-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1014,7 +968,7 @@ onMounted(async () => {
   align-items: center;
   gap: 12px;
 }
-.table-footer {
+.list-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1034,36 +988,110 @@ onMounted(async () => {
   color: var(--text-secondary, #909399);
 }
 
-/* Row highlighting */
-:deep(.row-danger) {
-  background-color: #fef0f0 !important;
+.empty-state {
+  text-align: center;
+  color: var(--text-secondary, #909399);
+  padding: 40px 0;
+  font-size: 14px;
 }
-:deep(.row-warning) {
-  background-color: #fdf6ec !important;
+
+/* ========================================================================== */
+/* Card List                                                                   */
+/* ========================================================================== */
+.card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 520px;
+  overflow-y: auto;
 }
-:deep(.row-info) {
-  background-color: #f0f9ff !important;
+
+.product-card {
+  border: 1px solid var(--border-light, #ebeef5);
+  border-radius: 10px;
+  padding: 12px 16px;
+  background: #fff;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  cursor: default;
+}
+.product-card:hover {
+  border-color: #c0c6d0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.product-card.card-danger {
+  border-left: 3px solid var(--el-color-danger, #f56c6c);
+  background: var(--el-color-danger-light-9, #fef0f0);
+}
+.product-card.card-warning {
+  border-left: 3px solid var(--el-color-warning, #e6a23c);
+  background: var(--el-color-warning-light-9, #fdf6ec);
+}
+.product-card.card-info {
+  border-left: 3px solid #909399;
+  background: #f4f4f5;
+}
+
+/* Card Header Row */
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.card-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary, #303133);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+.card-code {
+  font-size: 12px;
+  color: var(--text-secondary, #909399);
+  flex-shrink: 0;
+}
+.card-rop {
+  font-size: 13px;
+  font-weight: 700;
+  color: #005BF5;
+  margin-left: auto;
+}
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* Card Stats Row */
+.card-stats {
+  display: flex;
+  gap: 20px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-secondary, #909399);
+}
+.card-stats strong {
+  color: var(--text-primary, #303133);
+  font-weight: 600;
 }
 
 .text-danger {
   color: #f56c6c;
   font-weight: 600;
 }
-.rop-cell {
-  font-weight: 600;
-  color: #005BF5;
-}
-.rop-none {
-  color: #c0c4cc;
-}
 
 /* ========================================================================== */
-/* Expandable Detail Panel                                                    */
+/* Expandable Detail Panel (inside card)                                      */
 /* ========================================================================== */
 .expand-panel {
   border: 1px solid #d9ecff;
   border-radius: 10px;
   padding: 20px;
+  margin-top: 12px;
   background: #fafcff;
   display: flex;
   flex-direction: column;
@@ -1073,16 +1101,6 @@ onMounted(async () => {
 @keyframes slideDown {
   from { opacity: 0; max-height: 0; }
   to { opacity: 1; max-height: 800px; }
-}
-.expand-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.expand-title {
-  font-weight: 600;
-  font-size: 15px;
-  color: var(--text-primary, #303133);
 }
 
 /* Stock Info Row */
@@ -1218,61 +1236,9 @@ onMounted(async () => {
   color: var(--text-secondary, #909399);
 }
 
-/* ========================================================================== */
-/* AI Recommendation Section                                                   */
-/* ========================================================================== */
-.ai-section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
 .section-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-}
-.ai-loading {
-  min-height: 80px;
-}
-.ai-content-card {
-  background: linear-gradient(135deg, #f5f7fa, #eef2f7);
-  border: 1px solid #d9e2ef;
-  border-radius: 10px;
-  padding: 18px 22px;
-}
-.ai-text {
-  font-size: 14px;
-  line-height: 1.8;
-  color: #303133;
-}
-.ai-text p {
-  margin: 4px 0;
-}
-.ai-text li {
-  margin-left: 16px;
-  list-style: disc;
-}
-.ai-text h4 {
-  font-size: 15px;
-  font-weight: 600;
-  margin: 12px 0 6px;
-  color: #005BF5;
-}
-.ai-text h4:first-child {
-  margin-top: 0;
-}
-.ai-block {
-  margin-top: 16px;
-}
-.ai-chart-wrapper {
-  border: 1px solid var(--border-light, #ebeef5);
-  border-radius: 8px;
-  padding: 12px;
-  background: #fff;
-}
-.ai-table-wrapper {
-  border: 1px solid var(--border-light, #ebeef5);
-  border-radius: 8px;
-  overflow: hidden;
 }
 </style>

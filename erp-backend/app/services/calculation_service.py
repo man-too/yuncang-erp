@@ -90,6 +90,7 @@ def calc_reorder_point(
     db: Session,
     supplier_id: int | None = None,
     use_forecast: bool | None = None,
+    warehouse_id: int | None = None,
 ) -> dict:
     """计算再订货点 (ROP)
 
@@ -98,6 +99,8 @@ def calc_reorder_point(
 
     当 use_forecast=True 时，用 Darts/Prophet 预测替换简单均值，
     加权融合：w × forecast + (1-w) × formula
+
+    warehouse_id: 若指定，则 current_qty 取该仓库的库存量，suggested_qty 也基于该仓库计算
     """
     product = db.get(Product, product_id)
     if not product:
@@ -130,12 +133,19 @@ def calc_reorder_point(
                 if sup and sup.delivery_lead_time:
                     lead_time = sup.delivery_lead_time
 
-    # ── 当前库存（所有仓库总量）──
-    current_qty = float(
-        db.query(func.sum(Inventory.quantity))
-        .filter(Inventory.product_id == product_id)
-        .scalar() or 0
-    )
+    # ── 当前库存（按仓库或所有仓库总量）──
+    if warehouse_id:
+        current_qty = float(
+            db.query(Inventory.quantity)
+            .filter(Inventory.product_id == product_id, Inventory.warehouse_id == warehouse_id)
+            .scalar() or 0
+        )
+    else:
+        current_qty = float(
+            db.query(func.sum(Inventory.quantity))
+            .filter(Inventory.product_id == product_id)
+            .scalar() or 0
+        )
 
     # ── 在途采购量 ──
     in_transit_qty = float(

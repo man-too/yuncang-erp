@@ -153,10 +153,10 @@ export const aiApi = {
     http.post('/ai/execute', data),
   /** 库存 KPI */
   inventoryKpi: () => http.post('/ai/inventory-kpi'),
-  /** ROP 建议采购量 */
-  suggestedQty: (data: { product_id: number; supplier_id?: number }) => http.post('/ai/suggested-qty', null, { params: data }),
-  /** 批量 ROP 计算 */
-  batchRop: (data: { product_ids: number[] }) => http.post('/ai/batch-rop', data),
+  /** ROP 建议采购量（支持按仓库计算） */
+  suggestedQty: (data: { product_id: number; supplier_id?: number; warehouse_id?: number }) => http.post('/ai/suggested-qty', null, { params: data }),
+  /** 批量 ROP 计算（支持按仓库计算，warehouse_ids 为 product_id→warehouse_id 映射） */
+  batchRop: (data: { product_ids: number[]; warehouse_ids?: Record<number, number> }) => http.post('/ai/batch-rop', data),
   /** 补货量结构化推荐：ROP 基线 + AI 因素修正 */
   replenishRecommend: (productIds: number[]) =>
     http.post('/ai/replenish-recommend', { product_ids: productIds }),
@@ -172,4 +172,19 @@ export const aiApi = {
   weather: (params?: { city?: string; days?: number }) => http.get('/ai/weather', { params }),
   /** 采购计划风险审核 */
   auditPlan: (data: { items: Array<{ product_id: number; product_name: string; quantity: number; supplier_id: number; supplier_name: string }> }) => http.post('/ai/audit-plan', data),
+  /** 对话持久化 */
+  conversations: {
+    list: () => http.get('/ai/conversations'),
+    get: (id: string) => http.get(`/ai/conversations/${id}`),
+    save: (data: { id: string; title?: string; messages: any[] }) => http.post('/ai/conversations', data),
+    delete: (id: string) => http.delete(`/ai/conversations/${id}`),
+  },
+}
+
+/** 仪表盘 */
+export const dashboardApi = {
+  kpi: () => http.get('/ai/dashboard-kpi'),
+  trend: (params?: { product_id?: number; days?: number }) => http.get('/ai/dashboard-trend', { params }),
+  salesVolume: (params?: { product_id?: number; days?: number }) => http.get('/ai/dashboard-sales-volume', { params }),
+  purchaseAmount: (params?: { product_id?: number; days?: number }) => http.get('/ai/dashboard-purchase-amount', { params }),
 }

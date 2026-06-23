@@ -122,7 +122,7 @@
                   content="单源依赖：该供应商独家供应部分产品，建议开发备选供应商"
                   placement="top"
                 >
-                  <el-tag type="danger" size="small">单源风险</el-tag>
+                  <el-tag type="primary" size="small">单源风险</el-tag>
                 </el-tooltip>
                 <el-tooltip
                   v-if="row.risk_penalty > 0"

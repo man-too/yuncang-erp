@@ -32,11 +32,20 @@ export interface ChatMessage {
   timestamp: number
 }
 
+export interface ConversationMeta {
+  id: string
+  title: string
+  last_message: string
+  message_count: number
+  updated_at: string | null
+}
+
 export const useChatStore = defineStore('chat', () => {
   const conversationId = ref('')
   const messages = ref<ChatMessage[]>([])
   const isLoading = ref(false)
-  // P0-2 修复：跨调用追踪当前请求，便于 clearSession / unmount 中止
+  const conversations = ref<ConversationMeta[]>([])
+  const isNewConversation = ref(false)  // P0-2 修复：跨调用追踪当前请求，便于 clearSession / unmount 中止
   let currentController: AbortController | null = null
 
   function abortCurrentRequest() {
@@ -63,6 +72,7 @@ export const useChatStore = defineStore('chat', () => {
 
   async function sendMessage(content: string) {
     if (!content.trim() || isLoading.value) return
+    isNewConversation.value = false
     addMessage({ role: 'user', content, blocks: [] })
 
     const assistantMsg: ChatMessage = {
@@ -160,6 +170,7 @@ export const useChatStore = defineStore('chat', () => {
       }
       if (currentController === controller) currentController = null
       isLoading.value = false
+      await autoSaveConversation()
     }
   }
 
@@ -245,6 +256,7 @@ export const useChatStore = defineStore('chat', () => {
   /** 快捷操作：SSE 流式获取图表 + 模板分析 + LLM 深度分析 */
   async function sendQuickAction(type: string, content: string) {
     if (!content.trim() || isLoading.value) return
+    isNewConversation.value = false
 
     addMessage({ role: 'user', content, blocks: [] })
     isLoading.value = true
@@ -325,6 +337,7 @@ export const useChatStore = defineStore('chat', () => {
       }
     } finally {
       isLoading.value = false
+      await autoSaveConversation()
     }
   }
 
@@ -421,10 +434,89 @@ export const useChatStore = defineStore('chat', () => {
     isLoading.value = false
   }
 
+  /** 对话持久化：获取对话列表 */
+  async function fetchConversations() {
+    try {
+      const res: any = await aiApi.conversations.list()
+      conversations.value = res || []
+    } catch {
+      conversations.value = []
+    }
+  }
+
+  /** 对话持久化：加载指定对话 */
+  async function loadConversation(id: string) {
+    try {
+      const res: any = await aiApi.conversations.get(id)
+      conversationId.value = res.id
+      messages.value = (res.messages || []).map((m: any) => ({
+        id: uuid(),
+        role: m.role || 'assistant',
+        content: m.content || '',
+        blocks: (m.blocks || []).map((b: any) => normalizeBlock(b)),
+        timestamp: m.timestamp || Date.now(),
+      }))
+    } catch {
+      ElMessage.error('加载对话失败')
+    }
+  }
+
+  /** 对话持久化：删除对话 */
+  async function deleteConversation(id: string) {
+    try {
+      await aiApi.conversations.delete(id)
+      conversations.value = conversations.value.filter(c => c.id !== id)
+      if (conversationId.value === id) {
+        clearSession()
+      }
+    } catch {
+      ElMessage.error('删除对话失败')
+    }
+  }
+
+  /** 对话持久化：新建对话（先保存当前对话再清空，展示欢迎界面） */
+  async function newConversation() {
+    await autoSaveConversation()
+    clearSession()
+    isNewConversation.value = true
+  }
+
+  /** 对话持久化：自动保存（仅保留最近5轮/10条消息） */
+  async function autoSaveConversation() {
+    if (!conversationId.value || messages.value.length === 0) return
+    const lastUserMsg = messages.value.filter(m => m.role === 'user').slice(-1)[0]
+    const title = lastUserMsg?.content?.slice(0, 50) || '新对话'
+    const msgsToSave = messages.value.slice(-10).map(m => ({
+      role: m.role,
+      content: m.content,
+      blocks: m.blocks,
+      timestamp: m.timestamp,
+    }))
+    try {
+      await aiApi.conversations.save({
+        id: conversationId.value,
+        title,
+        messages: msgsToSave,
+      })
+    } catch (e) { console.error('autoSaveConversation failed:', e) }
+  }
+
+  /** 向聊天面板推送步骤摘要（纯文本，无表格无图表） */
+  function pushStepSummary(stepLabel: string, summaryText: string) {
+    if (!summaryText) return
+    addMessage({
+      role: 'assistant',
+      content: `**[${stepLabel}]**\n\n${summaryText}`,
+      blocks: [],
+    })
+  }
+
   return {
     conversationId,
     messages,
     isLoading,
+    conversations,
+    isNewConversation,
     addMessage,
     sendMessage,
     sendQuickAction,
@@ -432,5 +524,11 @@ export const useChatStore = defineStore('chat', () => {
     initConversation,
     clearSession,
     abortCurrentRequest,
+    fetchConversations,
+    loadConversation,
+    deleteConversation,
+    newConversation,
+    autoSaveConversation,
+    pushStepSummary,
   }
 })

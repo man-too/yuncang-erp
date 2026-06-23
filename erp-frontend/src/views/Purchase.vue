@@ -50,7 +50,7 @@
 
       <!-- 3. 功能按钮区 -->
       <div class="action-bar" style="margin-bottom: 16px; display: flex; gap: 12px;">
-        <el-button type="danger" :disabled="selectedRows.length === 0" @click="handleBatchDelete">
+        <el-button type="primary" plain :disabled="selectedRows.length === 0" @click="handleBatchDelete">
           批量删除 {{ selectedRows.length > 0 ? '(' + selectedRows.length + ')' : '' }}
         </el-button>
         <el-button @click="handleImport">导入</el-button>
@@ -75,7 +75,7 @@
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button size="small" text @click="viewDetail(row)">编辑</el-button>
-            <el-button size="small" type="danger" text @click="handleDelete(row.id)">删除</el-button>
+            <el-button size="small" text @click="handleDelete(row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -134,7 +134,7 @@
         </el-table-column>
         <el-table-column label="操作" width="60">
           <template #default="{ $index }">
-            <el-button type="danger" :icon="'Delete'" text @click="poForm.items.splice($index, 1)" />
+            <el-button :icon="'Delete'" text @click="poForm.items.splice($index, 1)" />
           </template>
         </el-table-column>
       </el-table>

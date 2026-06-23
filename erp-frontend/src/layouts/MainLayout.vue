@@ -14,10 +14,10 @@
       >
         <el-menu-item index="/dashboard">
           <el-icon><Odometer /></el-icon>
-          <span>工作台</span>
+          <span>首页</span>
         </el-menu-item>
         <el-menu-item index="/supplier">
-          <el-icon><Truck /></el-icon>
+          <el-icon><Van /></el-icon>
           <span>供应商管理</span>
         </el-menu-item>
         <el-menu-item index="/product">
@@ -71,7 +71,7 @@
       <!-- 主内容 -->
       <el-main class="app-main">
         <router-view v-slot="{ Component }">
-          <keep-alive :include="['AIDecision']">
+          <keep-alive :include="['AIDecision', 'Dashboard']">
             <component :is="Component" />
           </keep-alive>
         </router-view>

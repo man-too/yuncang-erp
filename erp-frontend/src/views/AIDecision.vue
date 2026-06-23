@@ -1,97 +1,113 @@
 <template>
-  <div>
-    <!-- 概览统计 -->
-    <el-row :gutter="16" style="margin-bottom: 12px;">
-      <el-col :span="6" v-for="card in summaryCards" :key="card.title">
-        <el-card shadow="hover" style="text-align: center; padding: 4px 0;">
-          <div style="font-size: 22px; font-weight: bold; line-height: 1.2;">{{ card.value }}</div>
-          <div style="font-size: 12px; color: #999;">{{ card.title }}</div>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <!-- 采购决策 -->
-    <div style="margin-bottom: 12px;">
-      <el-button type="primary" size="small" @click="purchaseStore.isExpanded = !purchaseStore.isExpanded">
-        采购决策生成
-      </el-button>
+  <div class="ai-decision-layout">
+    <!-- 左侧：聊天面板 -->
+    <div class="chat-panel">
+      <DecisionChat @panel-focus="handlePanelFocus" />
+      <!-- 右上角浮动按钮组 -->
+      <div class="top-right-btns">
+        <div v-if="purchaseStore.isExpanded && purchaseStore.isCollapsed" class="float-btn" @click="purchaseStore.expand()" title="展开采购决策">
+          <el-icon :size="16"><Right /></el-icon>
+        </div>
+        <div class="float-btn" @click="showConvDrawer = true" title="对话历史">
+          <el-icon :size="18"><ChatDotRound /></el-icon>
+        </div>
+      </div>
     </div>
 
-    <PurchaseDecisionWizard v-if="purchaseStore.isExpanded" style="margin-bottom: 12px;" @close="purchaseStore.close()" />
+    <!-- 右侧：采购决策向导 -->
+    <transition name="slide-right">
+      <div v-if="purchaseStore.isExpanded && !purchaseStore.isCollapsed" class="wizard-panel">
+        <PurchaseDecisionWizard @close="purchaseStore.close()" />
+      </div>
+    </transition>
 
-    <!-- AI 对话助手 -->
-    <DecisionChat @panel-focus="handlePanelFocus" />
-
-    <!-- 决策历史 -->
-    <el-collapse v-model="historyOpen" style="margin-top: 12px;">
-      <el-collapse-item title="AI 决策历史" name="history">
-        <el-table :data="historyList" stripe v-loading="historyLoading" max-height="300" size="small">
-          <el-table-column prop="decision_type" label="类型" width="120">
-            <template #default="{ row }">
-              <el-tag :type="typeTag(row.decision_type)" size="small">{{ typeLabel(row.decision_type) }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="title" label="标题" min-width="160" />
-          <el-table-column prop="summary" label="摘要" min-width="200" show-overflow-tooltip />
-          <el-table-column prop="confidence" label="置信度" width="90">
-            <template #default="{ row }">
-              <el-progress :percentage="Math.round(row.confidence * 100)" :status="row.confidence > 0.7 ? 'success' : 'warning'" :stroke-width="8" />
-            </template>
-          </el-table-column>
-          <el-table-column prop="created_at" label="时间" width="160" />
-        </el-table>
-      </el-collapse-item>
-    </el-collapse>
+    <!-- 对话历史抽屉 -->
+    <ConversationDrawer v-model="showConvDrawer" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue'
-import { aiApi } from '@/api'
+import { ref } from 'vue'
+import { ChatDotRound, Right } from '@element-plus/icons-vue'
 import PurchaseDecisionWizard from '@/views/ai/PurchaseDecisionWizard.vue'
 import DecisionChat from '@/views/ai/DecisionChat.vue'
+import ConversationDrawer from '@/views/ai/ConversationDrawer.vue'
 import { usePurchaseDecisionStore } from '@/stores/purchaseDecision'
 
 defineOptions({ name: 'AIDecision' })
+
 const purchaseStore = usePurchaseDecisionStore()
-const historyOpen = ref(false)
-const historyList = ref<any[]>([])
-const historyLoading = ref(false)
-
-// P1-8 修复：shallowReactive 只跟踪顶层引用，内部 value 赋值不触发更新；改用 reactive
-const summaryCards = reactive([
-  { title: 'AI 决策总数', value: 0 },
-  { title: '高置信度建议', value: 0 },
-  { title: '库存预警', value: 0 },
-  { title: '库存总项', value: 0 },
-])
-
-const typeTag = (t: string) => ({ stock_alert: 'danger', sales_forecast: 'warning', supplier_recommend: 'success' }[t] || 'info')
-const typeLabel = (t: string) => ({ stock_alert: '库存预警', sales_forecast: '销售预测', supplier_recommend: '供应商推荐' }[t] || t)
-
-const fetchHistory = async () => {
-  historyLoading.value = true
-  try {
-    const res: any = await aiApi.history({ limit: 20 })
-    historyList.value = res || []
-  } catch (_) {} finally { historyLoading.value = false }
-}
-
-const fetchDashboard = async () => {
-  try {
-    const res: any = await aiApi.dashboard()
-    if (res) {
-      summaryCards[0].value = res.total_decisions || 0
-      summaryCards[1].value = res.high_confidence_decisions || 0
-      summaryCards[2].value = res.low_stock_count || 0
-      summaryCards[3].value = res.total_inventory_items || 0
-    }
-  } catch (_) {}
-}
+const showConvDrawer = ref(false)
 
 const handlePanelFocus = (type: string) => {
-  if (type === 'purchase_advice') purchaseStore.isExpanded = true
+  if (type === 'purchase_advice') {
+    purchaseStore.isExpanded = true
+    purchaseStore.isCollapsed = false
+  }
+}
+</script>
+
+<style scoped>
+.ai-decision-layout {
+  display: flex;
+  gap: 16px;
+  height: calc(100vh - 120px);
+  min-height: 500px;
+  position: relative;
+}
+.chat-panel {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  overflow-y: auto;
+}
+.wizard-panel {
+  width: 50%;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  background: var(--el-bg-color);
 }
 
-onMounted(() => { fetchHistory(); fetchDashboard() })
-</script>
+/* 滑入动画 */
+.slide-right-enter-active,
+.slide-right-leave-active {
+  transition: all 0.3s ease;
+}
+.slide-right-enter-from,
+.slide-right-leave-to {
+  width: 0;
+  opacity: 0;
+  margin-right: -16px;
+  overflow: hidden;
+}
+
+/* 右上角浮动按钮组 */
+.top-right-btns {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  display: flex;
+  gap: 8px;
+  z-index: 5;
+}
+.float-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color);
+  color: var(--el-text-color-regular);
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+.float-btn:hover {
+  border-color: var(--el-color-primary);
+  color: var(--el-color-primary);
+}
+</style>

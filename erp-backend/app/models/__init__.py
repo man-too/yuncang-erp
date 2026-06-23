@@ -5,6 +5,7 @@ from app.models.purchase import PurchaseOrder, PurchaseOrderItem, PurchaseInboun
 from app.models.inventory import Warehouse, Inventory, InventoryRecord, InventoryAlert
 from app.models.sale import Customer, SaleOrder, SaleOrderItem, SaleOutbound
 from app.models.ai_analysis import AIDecisionRecord
+from app.models.conversation import Conversation
 
 __all__ = [
     "User",
@@ -14,4 +15,5 @@ __all__ = [
     "Warehouse", "Inventory", "InventoryRecord", "InventoryAlert",
     "Customer", "SaleOrder", "SaleOrderItem", "SaleOutbound",
     "AIDecisionRecord",
+    "Conversation",
 ]

@@ -42,7 +42,7 @@
 
       <!-- 3. 功能按钮区 -->
       <div class="action-bar" style="margin-bottom: 16px; display: flex; gap: 12px;">
-        <el-button type="danger" :disabled="selectedCRows.length === 0" @click="handleBatchDeleteCustomer">
+        <el-button type="primary" plain :disabled="selectedCRows.length === 0" @click="handleBatchDeleteCustomer">
           批量删除 {{ selectedCRows.length > 0 ? '(' + selectedCRows.length + ')' : '' }}
         </el-button>
         <el-button @click="handleImportCustomer">导入</el-button>
@@ -61,7 +61,7 @@
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button size="small" text @click="openEditCustomerDialog(row)">编辑</el-button>
-            <el-button size="small" type="danger" text @click="handleDeleteCustomer(row.id)">删除</el-button>
+            <el-button size="small" text @click="handleDeleteCustomer(row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -116,7 +116,7 @@
 
       <!-- 3. 功能按钮区 -->
       <div class="action-bar" style="margin-bottom: 16px; display: flex; gap: 12px;">
-        <el-button type="danger" :disabled="selectedSORows.length === 0" @click="handleBatchDeleteSO">
+        <el-button type="primary" plain :disabled="selectedSORows.length === 0" @click="handleBatchDeleteSO">
           批量删除 {{ selectedSORows.length > 0 ? '(' + selectedSORows.length + ')' : '' }}
         </el-button>
         <el-button @click="handleImportSO">导入</el-button>
@@ -141,7 +141,7 @@
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button size="small" text @click="viewSODetail(row)">查看</el-button>
-            <el-button size="small" type="danger" text @click="handleDeleteSO(row.id)">删除</el-button>
+            <el-button size="small" text @click="handleDeleteSO(row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -207,7 +207,7 @@
           <template #default="{ row }">{{ (row.quantity * row.unit_price).toFixed(2) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="60">
-          <template #default="{ $index }"><el-button type="danger" :icon="'Delete'" text @click="soForm.items.splice($index, 1)" /></template>
+          <template #default="{ $index }"><el-button :icon="'Delete'" text @click="soForm.items.splice($index, 1)" /></template>
         </el-table-column>
       </el-table>
       <el-button @click="soForm.items.push({ product_id: null, quantity: 1, unit_price: 0 })">添加行</el-button>
@@ -480,12 +480,17 @@ const viewSODetail = async (order: any) => {
 }
 
 onMounted(async () => {
-  const [prodRes, whRes] = await Promise.all([
-    productApi.list({ page: 1, page_size: 100 }),
-    inventoryApi.warehouses.list(),
-  ]) as any[]
-  products.value = prodRes.items || []
-  warehouses.value = whRes || []
+  try {
+    const [prodRes, whRes] = await Promise.all([
+      productApi.list({ page: 1, page_size: 100 }),
+      inventoryApi.warehouses.list(),
+    ]) as any[]
+    products.value = prodRes.items || []
+    warehouses.value = whRes || []
+  } catch {
+    products.value = []
+    warehouses.value = []
+  }
   fetchCustomers()
   fetchSO()
 })
