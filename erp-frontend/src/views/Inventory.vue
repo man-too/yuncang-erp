@@ -48,7 +48,7 @@
 
       <!-- 3. 功能按钮区 -->
       <div class="action-bar" style="margin-bottom: 16px; display: flex; gap: 12px;">
-        <el-button type="danger" :disabled="selectedRows.length === 0" @click="handleBatchDelete">
+        <el-button type="primary" plain :disabled="selectedRows.length === 0" @click="handleBatchDelete">
           批量删除 {{ selectedRows.length > 0 ? '(' + selectedRows.length + ')' : '' }}
         </el-button>
         <el-button @click="handleImport">导入</el-button>
@@ -69,7 +69,7 @@
         <el-table-column prop="min_stock" label="最低库存" width="100" align="right" />
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag v-if="row.quantity <= row.min_stock" type="danger" size="small">库存不足</el-tag>
+            <el-tag v-if="row.quantity <= row.min_stock" type="primary" size="small">库存不足</el-tag>
             <el-tag v-else-if="row.quantity >= row.max_stock" type="warning" size="small">库存过多</el-tag>
             <el-tag v-else type="success" size="small">正常</el-tag>
           </template>
@@ -77,7 +77,7 @@
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button size="small" text @click="openAdjust(row)">编辑</el-button>
-            <el-button size="small" type="danger" text @click="handleDelete(row.id)">删除</el-button>
+            <el-button size="small" text @click="handleDelete(row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -114,7 +114,7 @@
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
             <el-button v-if="!row.is_resolved" size="small" text @click="handleResolve(row.id)">编辑</el-button>
-            <el-button size="small" type="danger" text @click="handleDeleteAlert(row.id)">删除</el-button>
+            <el-button size="small" text @click="handleDeleteAlert(row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>

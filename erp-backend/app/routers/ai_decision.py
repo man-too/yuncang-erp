@@ -12,7 +12,7 @@ from sqlalchemy import func
 from app.database import get_db
 from app.models.product import Product
 from app.models.supplier import Supplier, SupplierEvaluation
-from app.models.purchase import PurchaseOrder, PurchaseOrderItem
+from app.models.purchase import PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus
 from app.models.inventory import Inventory
 from app.models.sale import SaleOrder, SaleOrderItem
 from app.models.ai_analysis import AIDecisionRecord
@@ -551,6 +551,198 @@ def ai_sales_history(
         current += timedelta(days=1)
 
     return result
+
+
+@router.get("/dashboard-kpi")
+def dashboard_kpi(db: Session = Depends(get_db), _user: User = Depends(get_current_user)):
+    """仪表盘 KPI 数据（6项）"""
+    today = date.today()
+    month_start = today.replace(day=1)
+
+    try:
+        today_purchase = db.query(PurchaseOrder).filter(
+            PurchaseOrder.order_date == today
+        ).count()
+    except Exception:
+        today_purchase = 0
+
+    try:
+        today_sale = db.query(SaleOrder).filter(
+            SaleOrder.order_date == today
+        ).count()
+    except Exception:
+        today_sale = 0
+
+    try:
+        monthly_amount = db.query(func.sum(SaleOrder.total_amount)).filter(
+            SaleOrder.order_date >= month_start
+        ).scalar() or 0
+    except Exception:
+        monthly_amount = 0
+
+    try:
+        pending_approval = db.query(PurchaseOrder).filter(
+            PurchaseOrder.status == PurchaseOrderStatus.PENDING_APPROVAL
+        ).count()
+    except Exception:
+        pending_approval = 0
+
+    try:
+        low_stock = db.query(Inventory).join(Product).filter(
+            Inventory.quantity <= Product.min_stock, Product.is_active == True
+        ).count()
+    except Exception:
+        low_stock = 0
+
+    try:
+        pending_inbound = db.query(PurchaseOrder).filter(
+            PurchaseOrder.status.in_([PurchaseOrderStatus.APPROVED, PurchaseOrderStatus.PARTIALLY_RECEIVED])
+        ).count()
+    except Exception:
+        pending_inbound = 0
+
+    try:
+        last_month_end = month_start - timedelta(days=1)
+        last_month_start = last_month_end.replace(day=1)
+        this_month_sales = db.query(func.sum(SaleOrder.total_amount)).filter(
+            SaleOrder.order_date >= month_start
+        ).scalar() or 0
+        last_month_sales = db.query(func.sum(SaleOrder.total_amount)).filter(
+            SaleOrder.order_date >= last_month_start,
+            SaleOrder.order_date < month_start,
+        ).scalar() or 0
+        growth_rate = ((this_month_sales - last_month_sales) / last_month_sales * 100) if last_month_sales > 0 else 0
+    except Exception:
+        growth_rate = 0
+
+    return {
+        "today_orders": today_purchase + today_sale,
+        "monthly_amount": round(float(monthly_amount), 2),
+        "pending_approval": pending_approval,
+        "low_stock_products": low_stock,
+        "pending_inbound": pending_inbound,
+        "sales_growth_rate": round(growth_rate, 1),
+    }
+
+
+@router.get("/dashboard-trend")
+def dashboard_trend(
+    product_id: Optional[int] = Query(None),
+    days: int = Query(30, ge=7, le=90),
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """仪表盘金额趋势（销售 + 采购双线）"""
+    start = date.today() - timedelta(days=days)
+    sales_by_date: dict = {}
+    purchase_by_date: dict = {}
+
+    try:
+        sales_query = db.query(
+            SaleOrder.order_date,
+            func.sum(SaleOrderItem.total_price).label("amount"),
+        ).join(SaleOrderItem, SaleOrderItem.order_id == SaleOrder.id).filter(
+            SaleOrder.order_date >= start
+        )
+        if product_id:
+            sales_query = sales_query.filter(SaleOrderItem.product_id == product_id)
+        sales_by_date = {r.order_date: float(r.amount or 0) for r in sales_query.group_by(SaleOrder.order_date).all()}
+    except Exception:
+        pass
+
+    try:
+        purchase_query = db.query(
+            PurchaseOrder.order_date,
+            func.sum(PurchaseOrderItem.total_price).label("amount"),
+        ).join(PurchaseOrderItem, PurchaseOrderItem.order_id == PurchaseOrder.id).filter(
+            PurchaseOrder.order_date >= start
+        )
+        if product_id:
+            purchase_query = purchase_query.filter(PurchaseOrderItem.product_id == product_id)
+        purchase_by_date = {r.order_date: float(r.amount or 0) for r in purchase_query.group_by(PurchaseOrder.order_date).all()}
+    except Exception:
+        pass
+
+    dates, sales, purchases = [], [], []
+    current = start
+    end = date.today()
+    while current <= end:
+        dates.append(str(current))
+        sales.append(sales_by_date.get(current, 0.0))
+        purchases.append(purchase_by_date.get(current, 0.0))
+        current += timedelta(days=1)
+
+    return {"dates": dates, "sales_amounts": sales, "purchase_amounts": purchases}
+
+
+@router.get("/dashboard-sales-volume")
+def dashboard_sales_volume(
+    product_id: Optional[int] = Query(None),
+    days: int = Query(7, ge=7, le=90),
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """仪表盘销量趋势（按日聚合）"""
+    start = date.today() - timedelta(days=days)
+    qty_by_date: dict = {}
+
+    try:
+        query = db.query(
+            SaleOrder.order_date,
+            func.sum(SaleOrderItem.quantity).label("total_qty"),
+        ).join(SaleOrderItem, SaleOrderItem.order_id == SaleOrder.id).filter(
+            SaleOrder.order_date >= start
+        )
+        if product_id:
+            query = query.filter(SaleOrderItem.product_id == product_id)
+        qty_by_date = {r.order_date: float(r.total_qty or 0) for r in query.group_by(SaleOrder.order_date).all()}
+    except Exception:
+        pass
+
+    dates, quantities = [], []
+    current = start
+    end = date.today()
+    while current <= end:
+        dates.append(str(current))
+        quantities.append(qty_by_date.get(current, 0.0))
+        current += timedelta(days=1)
+
+    return {"dates": dates, "quantities": quantities}
+
+
+@router.get("/dashboard-purchase-amount")
+def dashboard_purchase_amount(
+    product_id: Optional[int] = Query(None),
+    days: int = Query(30, ge=7, le=90),
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """仪表盘采购金额趋势（按日聚合）"""
+    start = date.today() - timedelta(days=days)
+    purchase_by_date: dict = {}
+
+    try:
+        query = db.query(
+            PurchaseOrder.order_date,
+            func.sum(PurchaseOrderItem.total_price).label("amount"),
+        ).join(PurchaseOrderItem, PurchaseOrderItem.order_id == PurchaseOrder.id).filter(
+            PurchaseOrder.order_date >= start
+        )
+        if product_id:
+            query = query.filter(PurchaseOrderItem.product_id == product_id)
+        purchase_by_date = {r.order_date: float(r.amount or 0) for r in query.group_by(PurchaseOrder.order_date).all()}
+    except Exception:
+        pass
+
+    dates, amounts = [], []
+    current = start
+    end = date.today()
+    while current <= end:
+        dates.append(str(current))
+        amounts.append(purchase_by_date.get(current, 0.0))
+        current += timedelta(days=1)
+
+    return {"dates": dates, "purchase_amounts": amounts}
 
 
 @router.post("/sales-prediction")

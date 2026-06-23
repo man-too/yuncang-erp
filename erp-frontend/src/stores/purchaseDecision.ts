@@ -35,6 +35,7 @@ export interface RestockItem {
 export const usePurchaseDecisionStore = defineStore('purchaseDecision', () => {
   const currentStep = ref(0)
   const isExpanded = ref(false)
+  const isCollapsed = ref(false)
   const isLoading = ref(false)
 
   // Step 0: 库存分析（选产品+仓库，不设数量和价格）
@@ -107,11 +108,18 @@ export const usePurchaseDecisionStore = defineStore('purchaseDecision', () => {
           }
         })
 
-        // Try batch ROP enrichment
+        // Try batch ROP enrichment (per-warehouse)
         const productIds = baseItems.map(b => b.product_id)
         if (productIds.length > 0) {
           try {
-            const ropRes: any = await aiApi.batchRop({ product_ids: productIds })
+            // Build warehouse_ids mapping for per-warehouse ROP
+            const warehouseIds: Record<number, number> = {}
+            for (const item of baseItems) {
+              if (item.warehouse_id) {
+                warehouseIds[item.product_id] = item.warehouse_id
+              }
+            }
+            const ropRes: any = await aiApi.batchRop({ product_ids: productIds, warehouse_ids: warehouseIds })
             const ropList: any[] = (ropRes && (ropRes.results || ropRes.items || ropRes.data)) || (Array.isArray(ropRes) ? ropRes : [])
             const ropMap: Record<number, any> = {}
             for (const r of ropList) {
@@ -120,11 +128,10 @@ export const usePurchaseDecisionStore = defineStore('purchaseDecision', () => {
             for (const item of baseItems) {
               const r = ropMap[item.product_id]
               if (r) {
-                if (typeof r.suggested_qty === 'number') {
+                if (typeof r.suggested_qty === 'number' && r.suggested_qty > 0) {
                   item.suggested_qty = r.suggested_qty
                 }
                 if (typeof r.rop === 'number') item.rop = r.rop
-                if (typeof r.current_qty === 'number') item.current_qty = r.current_qty
                 if (typeof r.in_transit_qty === 'number') item.in_transit_qty = r.in_transit_qty
                 if (typeof r.backlog_qty === 'number') item.backlog_qty = r.backlog_qty
                 if (r.trend != null) item.trend = r.trend
@@ -291,13 +298,22 @@ export const usePurchaseDecisionStore = defineStore('purchaseDecision', () => {
 
   function close() {
     isExpanded.value = false
+    isCollapsed.value = false
     reset()
   }
 
-  // Phase 3: 获取 ROP 建议采购量
-  async function fetchSuggestedQty(productId: number, supplierId?: number) {
+  function collapse() {
+    isCollapsed.value = true
+  }
+
+  function expand() {
+    isCollapsed.value = false
+  }
+
+  // Phase 3: 获取 ROP 建议采购量（支持按仓库计算）
+  async function fetchSuggestedQty(productId: number, supplierId?: number, warehouseId?: number) {
     try {
-      const res: any = await aiApi.suggestedQty({ product_id: productId, supplier_id: supplierId })
+      const res: any = await aiApi.suggestedQty({ product_id: productId, supplier_id: supplierId, warehouse_id: warehouseId })
       if (res) {
         suggestedQtys.value[productId] = res
       }
@@ -400,7 +416,7 @@ export const usePurchaseDecisionStore = defineStore('purchaseDecision', () => {
   }
 
   return {
-    currentStep, isExpanded, isLoading,
+    currentStep, isExpanded, isCollapsed, isLoading,
     allProducts, selectedIds, quantities, aiRecommendation,
     riskResults, supplierChoices, supplierInfo, forecastPrices, forecastQuantities,
     purchasePlan, selectedProducts, stepLabels,
@@ -408,7 +424,7 @@ export const usePurchaseDecisionStore = defineStore('purchaseDecision', () => {
     suggestedQtys, supplierQuantities, inventoryKpi, auditResult, aiSummary,
     fetchLowStockProducts, getRecommendation,
     toggleProduct, selectAll, deselectAll, addToProducts, removeSelected, removeProduct, updateProduct, setQuantity,
-    nextStep, prevStep, reset, close,
+    nextStep, prevStep, reset, close, collapse, expand,
     // Phase 3: 新增 actions
     fetchSuggestedQty, fetchInventoryKpi, fetchSupplierScore, fetchAuditPlan,
   }

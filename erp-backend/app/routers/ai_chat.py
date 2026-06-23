@@ -457,11 +457,12 @@ def ai_inventory_kpi(
 def ai_suggested_qty(
     product_id: int,
     supplier_id: int | None = None,
+    warehouse_id: int | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """ROP建议采购量（单个产品）"""
-    return execute_tool("calc_reorder_point", {"product_id": product_id, "supplier_id": supplier_id}, db)
+    """ROP建议采购量（单个产品，支持按仓库计算）"""
+    return execute_tool("calc_reorder_point", {"product_id": product_id, "supplier_id": supplier_id, "warehouse_id": warehouse_id}, db)
 
 
 @router.post("/batch-rop")
@@ -470,13 +471,28 @@ def ai_batch_rop(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """批量计算 ROP（多个产品一次性）"""
-    from app.services.calculation_service import batch_calc_reorder_point
+    """批量计算 ROP（多个产品一次性，支持按仓库计算）
+
+    请求体:
+      - product_ids: [1, 2, 3]
+      - warehouse_ids: {1: 2, 2: 1}  (可选，product_id → warehouse_id 映射)
+    """
+    from app.services.calculation_service import batch_calc_reorder_point, calc_reorder_point
     product_ids = data.get("product_ids", [])
+    warehouse_ids: dict = data.get("warehouse_ids", {})
     if not product_ids:
         return {"results": []}
-    result_map = batch_calc_reorder_point(product_ids, db)
-    return {"results": list(result_map.values())}
+
+    if warehouse_ids:
+        # 有仓库映射时，逐个调用 calc_reorder_point（支持 warehouse_id）
+        results = []
+        for pid in product_ids:
+            wid = warehouse_ids.get(pid)
+            results.append(calc_reorder_point(pid, db, warehouse_id=wid))
+        return {"results": results}
+    else:
+        result_map = batch_calc_reorder_point(product_ids, db)
+        return {"results": list(result_map.values())}
 
 
 @router.post("/supplier-score")
@@ -813,3 +829,127 @@ def ai_audit_plan(
     """采购计划风险审核"""
     items = data.get("items", [])
     return execute_tool("audit_purchase_plan", {"items": items}, db)
+
+
+# ── 对话持久化 ──────────────────────────────────────────────────────────
+
+from app.models.conversation import Conversation
+from pydantic import BaseModel as PydanticBaseModel
+
+
+class ConversationSaveRequest(PydanticBaseModel):
+    id: str
+    title: str = ""
+    messages: list = []
+
+
+@router.get("/conversations")
+def list_conversations(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """对话列表"""
+    convs = db.query(Conversation).filter(
+        Conversation.user_id == user.id
+    ).order_by(Conversation.updated_at.desc()).all()
+
+    result = []
+    for c in convs:
+        try:
+            msgs = json.loads(c.messages_json) if c.messages_json else []
+        except (json.JSONDecodeError, TypeError):
+            msgs = []
+        last_msg = ""
+        if msgs:
+            last = msgs[-1]
+            last_msg = (last.get("content") or "")[:80]
+        result.append({
+            "id": c.id,
+            "title": c.title,
+            "last_message": last_msg,
+            "message_count": len(msgs),
+            "updated_at": str(c.updated_at) if c.updated_at else None,
+        })
+    return result
+
+
+@router.get("/conversations/{conv_id}")
+def get_conversation(
+    conv_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """加载对话详情"""
+    conv = db.query(Conversation).filter(
+        Conversation.id == conv_id,
+        Conversation.user_id == user.id,
+    ).first()
+    if not conv:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    try:
+        messages = json.loads(conv.messages_json) if conv.messages_json else []
+    except (json.JSONDecodeError, TypeError):
+        messages = []
+    return {
+        "id": conv.id,
+        "title": conv.title,
+        "messages": messages,
+        "created_at": str(conv.created_at) if conv.created_at else None,
+        "updated_at": str(conv.updated_at) if conv.updated_at else None,
+    }
+
+
+@router.post("/conversations")
+def save_conversation(
+    req: ConversationSaveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """保存对话（仅保留最近5轮/10条消息）"""
+    # 仅保留最近10条消息（5轮 = 5 user + 5 assistant）
+    messages = req.messages[-10:] if len(req.messages) > 10 else req.messages
+
+    conv = db.query(Conversation).filter(
+        Conversation.id == req.id,
+    ).first()
+
+    if conv:
+        conv.title = req.title or conv.title
+        conv.messages_json = json.dumps(messages, ensure_ascii=False, default=str)
+    else:
+        conv = Conversation(
+            id=req.id,
+            user_id=user.id,
+            title=req.title or "新对话",
+            messages_json=json.dumps(messages, ensure_ascii=False, default=str),
+        )
+        db.add(conv)
+
+    # 限制用户最多5条对话，超出的自动删除最旧的
+    user_convs = db.query(Conversation).filter(
+        Conversation.user_id == user.id
+    ).order_by(Conversation.updated_at.desc()).all()
+    if len(user_convs) > 5:
+        for old_conv in user_convs[5:]:
+            db.delete(old_conv)
+
+    db.commit()
+    return {"success": True, "id": conv.id}
+
+
+@router.delete("/conversations/{conv_id}")
+def delete_conversation(
+    conv_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """删除对话"""
+    conv = db.query(Conversation).filter(
+        Conversation.id == conv_id,
+        Conversation.user_id == user.id,
+    ).first()
+    if not conv:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    db.delete(conv)
+    db.commit()
+    return {"success": True}
