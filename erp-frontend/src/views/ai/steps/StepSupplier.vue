@@ -62,7 +62,22 @@
             </div>
             <div class="product-qty-info">
               <span class="qty-label">需采购量:</span>
-              <span class="qty-value">{{ getNeededQty(product) }} {{ product.unit }}</span>
+              <el-input-number
+                :model-value="getNeededQty(product)"
+                :min="0"
+                :step="1"
+                size="small"
+                controls-position="right"
+                style="width: 100px;"
+                @change="(val: number) => onNeededQtyChange(product.product_id, val)"
+              />
+              <span class="qty-unit">{{ product.unit }}</span>
+              <el-tag
+                v-if="getRopValue(product.product_id) !== '—'"
+                :type="getRopPrecision(product.product_id) === 'final' ? 'success' : 'warning'"
+                size="small"
+                style="margin-left: 6px;"
+              >{{ getRopPrecision(product.product_id) === 'final' ? '终值' : '预估' }} ROP: {{ getRopValue(product.product_id) }}</el-tag>
               <el-tag
                 :type="allocationStatus(product.product_id).type"
                 size="small"
@@ -71,6 +86,11 @@
                 已分配: {{ allocatedQty(product.product_id) }}/{{ getNeededQty(product) }} {{ product.unit }}
               </el-tag>
             </div>
+          </div>
+          <!-- Product Total Amount -->
+          <div class="product-amount-row">
+            <span class="amount-label">应采购金额: ¥{{ getProductNeededAmount(product).toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}</span>
+            <span class="amount-label actual">购买总金额: ¥{{ getProductAllocatedAmount(product).toLocaleString('zh-CN', { minimumFractionDigits: 2 }) }}</span>
           </div>
 
           <!-- Allocation Warning -->
@@ -137,6 +157,11 @@
             <el-table-column label="交付评分" width="95" align="center">
               <template #default="{ row }">
                 {{ row.delivery ?? '—' }}
+              </template>
+            </el-table-column>
+            <el-table-column label="单价" width="100" align="right">
+              <template #default>
+                ¥{{ (store.forecastPrices[product.product_id] || product.purchase_price || 0).toFixed(2) }}
               </template>
             </el-table-column>
             <el-table-column label="建议分配" width="100" align="center">
@@ -381,10 +406,35 @@ function allocationStatus(productId: number): { type: string; over: boolean } {
   return { type: 'info', over: false }
 }
 
+function onNeededQtyChange(productId: number, val: number) {
+  // Update the store's quantities and suggestedQtys so downstream steps see the change
+  store.quantities[productId] = val || 0
+  const ropData = store.suggestedQtys[productId]
+  if (ropData) {
+    ropData.suggested_qty = val || 0
+  }
+}
+
 function getNeededQtyById(productId: number): number {
   const product = store.allProducts.find(p => p.product_id === productId)
   if (!product) return 0
   return getNeededQty(product)
+}
+
+// B5: Get ROP precision mode for a product (from cached suggestedQtys)
+function getRopPrecision(productId: number): 'estimate' | 'final' | null {
+  const ropData = store.suggestedQtys[productId]
+  if (ropData && ropData.precision_mode) return ropData.precision_mode as 'estimate' | 'final'
+  // Fallback: check product item itself
+  const product = store.allProducts.find(p => p.product_id === productId)
+  return product?.precision_mode ?? null
+}
+
+function getRopValue(productId: number): string {
+  const ropData = store.suggestedQtys[productId]
+  if (ropData && ropData.rop != null) return String(ropData.rop)
+  const product = store.allProducts.find(p => p.product_id === productId)
+  return product?.rop != null ? String(product.rop) : '—'
 }
 
 // ---- Methods: Suggested Allocation ----
@@ -518,6 +568,20 @@ function onAllocationChange(productId: number, supplierId: number, value: number
 
 function sortByScore(a: any, b: any): number {
   return (a.total_score || 0) - (b.total_score || 0)
+}
+
+function getProductNeededAmount(product: RestockItem): number {
+  const needed = getNeededQty(product)
+  const price = store.forecastPrices[product.product_id] || product.purchase_price || 0
+  return needed * price
+}
+
+function getProductAllocatedAmount(product: RestockItem): number {
+  const alloc = store.supplierQuantities[product.product_id]
+  if (!alloc) return 0
+  const price = store.forecastPrices[product.product_id] || product.purchase_price || 0
+  const totalQty = Object.values(alloc).reduce((sum, v) => sum + (v as number), 0)
+  return totalQty * price
 }
 
 function handleNextStep() {
@@ -716,6 +780,28 @@ onMounted(async () => {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+}
+.qty-unit {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-left: 4px;
+}
+.product-amount-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  background: var(--el-fill-color-light);
+  border-radius: 6px;
+  flex-wrap: wrap;
+}
+.amount-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.amount-label.actual {
+  color: var(--el-color-danger);
+  font-weight: 600;
 }
 .suggested-qty {
   font-size: 12px;
